@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>数据面板</title>
+<style>
+body{font-family:sans-serif;margin:20px;}
+table{border-collapse:collapse;width:100%;margin-top:16px;}
+th,td{border:1px solid #ccc;padding:8px;text-align:center;font-size:14px;}
+th{background:#1F4E78;color:#fff;}
+input,select{padding:4px;margin:2px;}
+.btn{padding:5px 10px;margin:2px;text-decoration:none;font-size:13px;border-radius:3px;display:inline-block;border:none;cursor:pointer;}
+.btn-edit{background:#f0ad4e;color:#fff;}
+.btn-del{background:#d9534f;color:#fff;}
+.flash-success{color:green;} .flash-error{color:red;}
+a{color:#1F4E78;}
+</style></head>
+<body>
+<p>当前用户：<b>{{ current_user.username }}</b>（{{ "管理员" if is_admin else "普通用户" }}）
+ | <a href="{{ url_for('logout') }}">退出</a>
+ {% if is_admin %}
+ | <a href="{{ url_for('export_csv') }}">导出全部 CSV</a>
+ | <a href="{{ url_for('manage_users') }}">用户管理</a>
+ | <a href="{{ url_for('manage_agents') }}">中介管理</a>
+ | <a href="{{ url_for('manage_prices') }}">价目管理</a>
+ | 注册功能：
+   <form method="post" action="{{ url_for('toggle_registration') }}" style="display:inline;">
+     <button type="submit">{{ "关闭注册" if registration_open else "开启注册" }}</button>
+   </form>
+ {% endif %}
+</p>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}<p class="flash-{{ cat }}">{{ msg }}</p>{% endfor %}
+{% endwith %}
+
+<p>总数量：<b id="total-qty">{{ total_qty }}</b>　总金额：<b id="total-amt">{{ total_amt }}</b></p>
+
+<h3>新增记录</h3>
+<form method="post" action="{{ url_for('add_record') }}">
+  {% if is_admin %}
+  所属账号：<input name="owner" value="000" size="6">
+  {% endif %}
+  中介：
+  <select name="agent" required>
+    {% for a in all_agents %}<option value="{{ a.name }}">{{ a.name }}</option>{% endfor %}
+  </select>
+  类别：<input name="category" required size="10">
+  数量：<input name="quantity" type="number" value="0" size="5">
+  {% if is_admin %}价格：<input name="price" type="number" step="0.01" value="0" size="5">{% endif %}
+  备注：<input name="note" size="12">
+  <button type="submit">添加</button>
+</form>
+
+<h3>数据列表</h3>
+<table>
+<thead>
+<tr><th>ID</th><th>所属账号</th><th>中介</th><th>类别</th><th>数量</th><th>价格</th><th>合计</th><th>备注</th><th>操作</th></tr>
+</thead>
+<tbody id="records-body">
+{% for r in records %}
+<tr>
+  <td>{{ r.id }}</td>
+  <td>{{ r.owner }}</td>
+  <td>{{ r.agent }}</td>
+  <td>{{ r.category }}</td>
+  <td>{{ r.quantity }}</td>
+  <td>
+  {% if is_admin %}
+    <form method="post" action="{{ url_for('update_price', rid=r.id) }}" style="display:flex;gap:4px;justify-content:center;">
+      <input name="price" type="number" step="0.01" value="{{ r.price }}" style="width:80px;">
+      <button type="submit">改价</button>
+    </form>
+  {% else %}
+    {{ r.price }}
+  {% endif %}
+  </td>
+  <td>{{ r.total }}</td>
+  <td>{{ r.note }}</td>
+  <td>
+    <a class="btn btn-edit" href="{{ url_for('edit_record', rid=r.id) }}">编辑</a>
+    <form method="post" action="{{ url_for('delete_record', rid=r.id) }}" style="display:inline;" onsubmit="return confirm('确定删除？')">
+      <button class="btn btn-del" type="submit">删除</button>
+    </form>
+  </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+
+<script>
+async function refreshData() {
+  try {
+    const resp = await fetch("{{ url_for('api_records') }}", { cache: "no-store" });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    document.getElementById("total-qty").textContent = data.total_qty;
+    document.getElementById("total-amt").textContent = data.total_amt;
+    const tbody = document.getElementById("records-body");
+    tbody.innerHTML = "";
+    for (const r of data.records) {
+      const tr = document.createElement("tr");
+      const priceCell = data.is_admin
+        ? `<form method="post" action="/record/${r.id}/price" style="display:flex;gap:4px;justify-content:center;">
+             <input name="price" type="number" step="0.01" value="${r.price}" style="width:80px;">
+             <button type="submit">改价</button>
+           </form>`
+        : `${r.price}`;
+      tr.innerHTML = `
+        <td>${r.id}</td>
+        <td>${r.owner}</td>
+        <td>${r.agent}</td>
+        <td>${r.category}</td>
+        <td>${r.quantity}</td>
+        <td>${priceCell}</td>
+        <td>${r.total}</td>
+        <td>${r.note}</td>
+        <td>
+          <a class="btn btn-edit" href="/record/${r.id}/edit">编辑</a>
+          <form method="post" action="/record/${r.id}/delete" style="display:inline;" onsubmit="return confirm('确定删除？')">
+            <button class="btn btn-del" type="submit">删除</button>
+          </form>
+        </td>`;
+      tbody.appendChild(tr);
+    }
+  } catch (e) {}
+}
+setInterval(refreshData, 10000);
+</script>
+</body></html>
