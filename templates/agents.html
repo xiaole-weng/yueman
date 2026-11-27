@@ -23,16 +23,37 @@ th{background:#1F4E78;color:#fff;}
 <table>
 <tr><th>ID</th><th>中介名称</th><th>操作</th></tr>
 {% for a in agents %}
-<tr>
+<tr id="agent-row-{{ a.id }}">
   <td>{{ a.id }}</td>
   <td>{{ a.name }}</td>
   <td>
-    <form method="post" action="{{ url_for('delete_agent', aid=a.id) }}" style="display:inline;"
-          onsubmit="return confirm('确定删除中介【{{ a.name }}】？删除后将无法在录入时选择该中介。')">
-      <button class="btn-del" type="submit">删除</button>
-    </form>
+    <button class="btn-del" onclick="deleteAgent({{ a.id }}, '{{ a.name }}')">删除</button>
   </td>
 </tr>
 {% endfor %}
 </table>
+
+<script>
+async function deleteAgent(id, name) {
+    if (!confirm(`确定要彻底删除中介【${name}】吗？\n警告：删除后，相关历史记录会被标记为“已删除”。`)) return;
+    
+    try {
+        const response = await fetch(`/api/agents/${id}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            alert(data.msg);
+            // 成功后直接移除这一行，页面不刷新
+            document.getElementById(`agent-row-${id}`).remove();
+        } else {
+            alert(`删除失败：${data.msg}`);
+        }
+    } catch (error) {
+        alert('网络请求失败，请查看后台日志或联系管理员。');
+    }
+}
+</script>
 </body></html>
