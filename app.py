@@ -11,8 +11,6 @@ from sqlalchemy import func
 from models import db, User, Record, Setting, Agent, PriceRule
 
 app = Flask(__name__)
-app.config["PROPAGATE_EXCEPTIONS"] = True 
-app.debug = True
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 db_path = os.environ.get("DATABASE_PATH", "/data/app.db")
 app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
@@ -24,11 +22,9 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = "login"
 
-
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))
-
 
 def admin_required(f):
     @wraps(f)
@@ -39,13 +35,11 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated
 
-
 USERNAME_RE = re.compile(r"^[\u4e00-\u9fa5A-Za-z0-9_-]{2,32}$")
 CATEGORIES = ["100-200", "250-300", "350-", "400+", "监管", "安卓500下", "安卓500上"]
 DEFAULT_PRICES = {"100-200": 40, "250-300": 80, "350-": 100,
                   "400+": 120, "监管": 100, "安卓500下": 28, "安卓500上": 68}
 DEFAULT_AGENTS = ["星空", "小泪", "小C", "怡丰", "小林", "小蕾", "狂妄", "小乐"]
-
 
 def init_db():
     with app.app_context():
@@ -65,7 +59,6 @@ def init_db():
                     db.session.add(PriceRule(agent=agent, category=cat, price=p))
         db.session.commit()
 
-
 # ============ 登录 / 注册 / 登出 ============
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -79,7 +72,6 @@ def login():
         flash("账号或密码错误", "error")
     return render_template("login.html",
                            registration_open=(Setting.get("registration_open", "0") == "1"))
-
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
@@ -110,33 +102,83 @@ def register():
         return redirect(url_for("login"))
     return render_template("register.html")
 
-
 @app.route("/logout")
 @login_required
 def logout():
     logout_user()
     return redirect(url_for("login"))
 
-
-# ============ 面板 ============
+# ============ 面板（按 Excel 格式聚合） ============
 @app.route("/")
 @login_required
 def dashboard():
     if current_user.role == "admin":
-        records = Record.query.order_by(Record.id.desc()).all()
-        users = User.query.all()
+        selected_user = request.args.get("user", "all")
+        if selected_user == "all":
+            records = Record.query.all()
+            users = User.query.all()
+        else:
+            records = Record.query.filter_by(owner=selected_user).all()
+            users = User.query.all()
     else:
-        records = Record.query.filter_by(owner=current_user.username).order_by(Record.id.desc()).all()
+        selected_user = current_user.username
+        records = Record.query.filter_by(owner=current_user.username).all()
         users = [current_user]
-    total_qty = sum(r.quantity or 0 for r in records)
-    total_amt = sum((r.quantity or 0) * (r.price or 0) for r in records)
-    all_agents = Agent.query.order_by(Agent.name).all()
-    return render_template("dashboard.html", records=records, users=users,
-                           is_admin=(current_user.role == "admin"),
-                           registration_open=(Setting.get("registration_open", "0") == "1"),
-                           total_qty=total_qty, total_amt=total_amt,
-                           all_agents=all_agents)
 
+    all_agents = [a.name for a in Agent.query.order_by(Agent.id).all()]
+    categories = CATEGORIES
+
+    summary = {a: {c: {'qty': 0, 'amt': 0} for c in categories} for a in all_agents}
+    agent_totals = {a: {'qty': 0, 'amt': 0} for a in all_agents}
+    category_totals = {c: {'qty': 0, 'amt': 0} for c in categories}
+    grand_total = {'qty': 0, 'amt': 0}
+    user_summary = {}
+    
+    if current_user.role == "admin" and selected_user == "all":
+        for u in users:
+            user_summary[u.username] = {'qty': 0, 'amt': 0}
+
+    for r in records:
+        qty = r.quantity or 0
+        amt = qty * (r.price or 0)
+        
+        if r.agent in summary and r.category in summary[r.agent]:
+            summary[r.agent][r.category]['qty'] += qty
+            summary[r.agent][r.category]['amt'] += amt
+            
+        if r.agent in agent_totals:
+            agent_totals[r.agent]['qty'] += qty
+            agent_totals[r.agent]['amt'] += amt
+        if r.category in category_totals:
+            category_totals[r.category]['qty'] += qty
+            category_totals[r.category]['amt'] += amt
+            
+        grand_total['qty'] += qty
+        grand_total['amt'] += amt
+
+        if current_user.role == "admin" and selected_user == "all":
+            if r.owner in user_summary:
+                user_summary[r.owner]['qty'] += qty
+                user_summary[r.owner]['amt'] += amt
+        elif current_user.role != "admin":
+            if current_user.username not in user_summary:
+                user_summary[current_user.username] = {'qty': 0, 'amt': 0}
+            user_summary[current_user.username]['qty'] += qty
+            user_summary[current_user.username]['amt'] += amt
+
+    return render_template("dashboard.html", 
+                           records=records,
+                           is_admin=(current_user.role == "admin"),
+                           users=users,
+                           selected_user=selected_user,
+                           all_agents=all_agents,
+                           categories=categories,
+                           summary=summary,
+                           agent_totals=agent_totals,
+                           category_totals=category_totals,
+                           grand_total=grand_total,
+                           user_summary=user_summary,
+                           registration_open=(Setting.get("registration_open", "0") == "1"))
 
 @app.route("/api/records")
 @login_required
@@ -157,37 +199,42 @@ def api_records():
         "is_admin": current_user.role == "admin"
     })
 
-
 # ============ 新增 / 编辑 / 删除 ============
 @app.route("/record/add", methods=["POST"])
 @login_required
 def add_record():
     if current_user.role == "admin":
-        owner = request.form.get("owner", current_user.username)
+        owner = request.form.get("owner")
+        if not owner or not User.query.filter_by(username=owner).first():
+            flash("请选择有效的所属账号", "error")
+            return redirect(url_for("dashboard"))
         price = float(request.form.get("price") or 0)
     else:
         owner = current_user.username
         price = None
+        
     agent = request.form.get("agent", "").strip()
     category = request.form.get("category", "").strip()
     quantity = int(request.form.get("quantity") or 0)
     note = request.form.get("note", "").strip()
+    
     if not agent or not category:
         flash("中介和类别不能为空", "error")
         return redirect(url_for("dashboard"))
+        
     if current_user.role != "admin":
         if not Agent.query.filter_by(name=agent).first():
             flash("该中介不存在，请联系管理员添加", "error")
             return redirect(url_for("dashboard"))
         rule = PriceRule.query.filter_by(agent=agent, category=category).first()
         price = rule.price if rule else 0
+        
     rec = Record(owner=owner, agent=agent, category=category,
                  quantity=quantity, price=price or 0, note=note)
     db.session.add(rec)
     db.session.commit()
     flash("添加成功", "success")
     return redirect(url_for("dashboard"))
-
 
 @app.route("/record/<int:rid>/edit", methods=["GET", "POST"])
 @login_required
@@ -196,23 +243,27 @@ def edit_record(rid):
     if current_user.role != "admin" and rec.owner != current_user.username:
         flash("无权编辑此记录", "error")
         return redirect(url_for("dashboard"))
+        
     if request.method == "POST":
         if current_user.role == "admin":
+            new_owner = request.form.get("owner", rec.owner)
+            if User.query.filter_by(username=new_owner).first():
+                rec.owner = new_owner
             rec.agent = request.form.get("agent", rec.agent)
             rec.price = float(request.form.get("price") or 0)
-            rec.owner = request.form.get("owner", rec.owner)
+            
         rec.category = request.form.get("category", rec.category)
         rec.quantity = int(request.form.get("quantity") or 0)
-        rec.note = request.form.get("note", "")
+        rec.note = request.form.get("note", "").strip()
         db.session.commit()
         flash("更新成功", "success")
         return redirect(url_for("dashboard"))
-    users = User.query.all() if current_user.role == "admin" else [current_user]
+        
+    users = User.query.order_by(User.id).all() if current_user.role == "admin" else [current_user]
     all_agents = Agent.query.order_by(Agent.name).all()
     return render_template("edit.html", record=rec, users=users,
                            is_admin=(current_user.role == "admin"),
                            all_agents=all_agents)
-
 
 @app.route("/record/<int:rid>/delete", methods=["POST"])
 @login_required
@@ -226,7 +277,6 @@ def delete_record(rid):
     flash("已删除", "success")
     return redirect(url_for("dashboard"))
 
-
 # ============ 管理员：内联改价 ============
 @app.route("/record/<int:rid>/price", methods=["POST"])
 @login_required
@@ -237,7 +287,6 @@ def update_price(rid):
     db.session.commit()
     flash("价格已更新", "success")
     return redirect(url_for("dashboard"))
-
 
 # ============ 管理员：中介管理 ============
 @app.route("/agents", methods=["GET", "POST"])
@@ -256,7 +305,6 @@ def manage_agents():
     agents = Agent.query.order_by(Agent.name).all()
     return render_template("agents.html", agents=agents)
 
-
 @app.route("/agents/<int:aid>/delete", methods=["POST"])
 @login_required
 @admin_required
@@ -266,7 +314,6 @@ def delete_agent(aid):
     db.session.commit()
     flash("中介已删除（已有记录不受影响）", "success")
     return redirect(url_for("manage_agents"))
-
 
 # ============ 管理员：价目管理 ============
 @app.route("/prices", methods=["GET", "POST"])
@@ -290,7 +337,6 @@ def manage_prices():
     return render_template("prices.html", agents=agents,
                            categories=CATEGORIES, rules=rules)
 
-
 # ============ 管理员：用户管理 ============
 @app.route("/admin/users")
 @login_required
@@ -300,7 +346,6 @@ def manage_users():
     counts = {u.username: Record.query.filter_by(owner=u.username).count() for u in users}
     return render_template("users.html", users=users, counts=counts,
                            current_username=current_user.username)
-
 
 @app.route("/admin/users/<int:uid>/delete", methods=["POST"])
 @login_required
@@ -318,7 +363,6 @@ def delete_user(uid):
     db.session.commit()
     flash(f"已删除用户 {user.username} 及其记录", "success")
     return redirect(url_for("manage_users"))
-
 
 @app.route("/admin/users/<int:uid>/password", methods=["GET", "POST"])
 @login_required
@@ -339,7 +383,6 @@ def change_user_password(uid):
             return redirect(url_for("manage_users"))
     return render_template("change_password.html", user=user)
 
-
 # ============ 注册开关 ============
 @app.route("/admin/toggle-registration", methods=["POST"])
 @login_required
@@ -349,7 +392,6 @@ def toggle_registration():
     Setting.set("registration_open", "0" if current == "1" else "1")
     flash("注册功能已" + ("开启" if current == "0" else "关闭"), "success")
     return redirect(url_for("dashboard"))
-
 
 # ============ 导出 CSV ============
 @app.route("/export")
@@ -367,7 +409,7 @@ def export_csv():
     return Response(output.getvalue(), mimetype="text/csv",
                     headers={"Content-Disposition": "attachment; filename=monthly_data.csv"})
 
-
+# ============ 强制启动时初始化数据库 ============
 init_db()
 
 if __name__ == "__main__":
