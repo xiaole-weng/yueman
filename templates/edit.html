@@ -7,7 +7,9 @@ input,select{width:100%;padding:6px;margin:4px 0;box-sizing:border-box;}</style>
 <form method="post">
   {% if is_admin %}
   所属账号：<select name="owner">
-    {% for u in users %}<option value="{{ u.username }}" {% if u.username==record.owner %}selected{% endif %}>{{ u.username }}</option>{% endfor %}
+    {% for u in users %}
+      <option value="{{ u.username }}" {% if u.username==record.owner %}selected{% endif %}>{{ u.username }}</option>
+    {% endfor %}
   </select><br>
   中介：<select name="agent">
     {% for a in all_agents %}<option value="{{ a.name }}" {% if a.name==record.agent %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
@@ -19,7 +21,7 @@ input,select{width:100%;padding:6px;margin:4px 0;box-sizing:border-box;}</style>
   {% endif %}
   类别：<input name="category" value="{{ record.category }}" required><br>
   数量：<input name="quantity" type="number" value="{{ record.quantity }}"><br>
-  备注：<input name="note" value="{{ record.note }}"><br>
+  备注名称：<input name="note" value="{{ record.note }}" placeholder="如 客户张三"><br>
   <button type="submit">保存</button>
   <a href="{{ url_for('dashboard') }}">取消</a>
 </form>
