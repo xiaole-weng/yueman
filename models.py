@@ -27,7 +27,6 @@ class Record(db.Model):
     quantity = db.Column(db.Integer, default=0)
     price = db.Column(db.Float, default=0)
     note = db.Column(db.String(200), default="")
-    # 确保 month 字段存在且有默认值
     month = db.Column(db.String(7), nullable=True, default=lambda: datetime.now().strftime("%Y-%m"))
 
     @property
