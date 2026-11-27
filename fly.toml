@@ -1,5 +1,5 @@
 app = "yueman-record-2026"
-primary_region = "hkg"
+primary_region = "nrt"
 
 [build]
 
