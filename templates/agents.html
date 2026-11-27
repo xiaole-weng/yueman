@@ -31,7 +31,6 @@ th{background:#1F4E78;color:#fff;}
   <td>{{ a.id }}</td>
   <td>{{ a.name }}</td>
   <td>
-    <!-- 强制渲染按钮，点击触发 JS -->
     <button type="button" class="btn-del" onclick="deleteAgent({{ a.id }}, '{{ a.name }}')">删除</button>
   </td>
 </tr>
@@ -40,26 +39,22 @@ th{background:#1F4E78;color:#fff;}
 
 <script>
 async function deleteAgent(id, name) {
-    if (!confirm(`确定要彻底删除中介【${name}】吗？\n警告：删除后，旧数据会标记为“已删除_${name}”，但表格里以后就不能选这个中介了。`)) {
+    if (!confirm(`确定要彻底删除中介【${name}】吗？\n警告：删除后，旧数据会标记为“已删除_${name}”，表格里以后就不能选这个中介了。`)) {
         return;
     }
     
     try {
-        // 发送 DELETE 请求到后端的 API
         const response = await fetch(`/api/agents/${id}`, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' }
         });
         
-        // 解析后端返回的 JSON
         const data = await response.json();
         
         if (response.ok && data.status === 'success') {
             alert(data.msg);
-            // 成功后直接在页面上移除这一行，不需要刷新页面
             document.getElementById(`agent-row-${id}`).remove();
         } else {
-            // 如果后端报错（比如数据库锁定），这里会弹出具体的失败原因
             alert(`删除失败：${data.msg || '未知错误'}`);
         }
     } catch (error) {
