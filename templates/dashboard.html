@@ -33,8 +33,9 @@ input,select,button{padding:4px;margin:2px;}
   {% for cat, msg in messages %}<p class="flash-{{ cat }}">{{ msg }}</p>{% endfor %}
 {% endwith %}
 
-<div style="background:#eef; padding:10px; margin-bottom:20px; border-radius:5px;">
-    <form method="get" action="{{ url_for('dashboard') }}" style="display:inline;">
+<!-- 顶部控制栏 -->
+<div style="background:#eef; padding:10px; margin-bottom:20px; border-radius:5px; overflow:hidden; display:flex; justify-content:space-between; align-items:center;">
+    <form method="get" action="{{ url_for('dashboard') }}">
         <b>📅 查看统计表：</b>
         <select name="month" onchange="this.form.submit()" style="font-size:16px; padding:4px;">
             {% for m in month_options %}
@@ -55,7 +56,7 @@ input,select,button{padding:4px;margin:2px;}
     </form>
     
     {% if is_admin %}
-    <div style="float:right;">
+    <div>
         <form method="post" action="{{ url_for('create_new_month') }}" style="margin:0;">
             <b>➕ 创建新表：</b>
             <input type="month" name="new_month" required style="padding:3px;">
