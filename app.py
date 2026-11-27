@@ -3,6 +3,7 @@ import csv
 import io
 import re
 from functools import wraps
+from datetime import datetime
 from flask import (Flask, render_template, request, redirect, url_for,
                    flash, Response, jsonify)
 from flask_login import (LoginManager, login_user, logout_user,
@@ -44,6 +45,13 @@ DEFAULT_AGENTS = ["阿姆", "从新", "森", "金晟", "明mu", "海风", "看�
 def init_db():
     with app.app_context():
         db.create_all()
+        # 如果旧数据库没有 month 字段，这里自动补全（SQLite特性）
+        try:
+            db.session.execute(db.text("ALTER TABLE records ADD COLUMN month VARCHAR(7) DEFAULT '2026-11'"))
+            db.session.commit()
+        except Exception:
+            pass
+
         if not User.query.filter_by(username="000").first():
             admin = User(username="000", role="admin")
             admin.set_password("000")
@@ -59,7 +67,6 @@ def init_db():
                     db.session.add(PriceRule(agent=agent, category=cat, price=p))
         db.session.commit()
 
-# ============ 登录 / 注册 / 登出 ============
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -108,22 +115,33 @@ def logout():
     logout_user()
     return redirect(url_for("login"))
 
-# ============ 面板（按 Excel 格式聚合） ============
 @app.route("/")
 @login_required
 def dashboard():
+    # 获取月份筛选，默认为本月
+    selected_month = request.args.get("month", datetime.now().strftime("%Y-%m"))
+    
+    # 基础查询
+    query = Record.query.filter_by(month=selected_month)
+    
     if current_user.role == "admin":
         selected_user = request.args.get("user", "all")
-        if selected_user == "all":
-            records = Record.query.all()
-            users = User.query.all()
-        else:
-            records = Record.query.filter_by(owner=selected_user).all()
-            users = User.query.all()
+        if selected_user != "all":
+            query = query.filter_by(owner=selected_user)
+        users = User.query.all()
     else:
         selected_user = current_user.username
-        records = Record.query.filter_by(owner=current_user.username).all()
+        query = query.filter_by(owner=current_user.username)
         users = [current_user]
+        
+    records = query.all()
+    
+    # 获取所有有数据的月份供下拉选择
+    all_months = db.session.query(Record.month).distinct().order_by(Record.month.desc()).all()
+    month_options = [m[0] for m in all_months if m[0]]
+    if selected_month not in month_options:
+        month_options.append(selected_month)
+        month_options.sort(reverse=True)
 
     all_agents = [a.name for a in Agent.query.order_by(Agent.id).all()]
     categories = CATEGORIES
@@ -171,6 +189,8 @@ def dashboard():
                            is_admin=(current_user.role == "admin"),
                            users=users,
                            selected_user=selected_user,
+                           selected_month=selected_month,
+                           month_options=month_options,
                            all_agents=all_agents,
                            categories=categories,
                            summary=summary,
@@ -180,26 +200,6 @@ def dashboard():
                            user_summary=user_summary,
                            registration_open=(Setting.get("registration_open", "0") == "1"))
 
-@app.route("/api/records")
-@login_required
-def api_records():
-    if current_user.role == "admin":
-        records = Record.query.order_by(Record.id.desc()).all()
-    else:
-        records = Record.query.filter_by(owner=current_user.username).order_by(Record.id.desc()).all()
-    data = [{
-        "id": r.id, "owner": r.owner, "agent": r.agent, "category": r.category,
-        "quantity": r.quantity, "price": r.price,
-        "total": (r.quantity or 0) * (r.price or 0), "note": r.note
-    } for r in records]
-    return jsonify({
-        "records": data,
-        "total_qty": sum(r["quantity"] or 0 for r in data),
-        "total_amt": sum(r["total"] for r in data),
-        "is_admin": current_user.role == "admin"
-    })
-
-# ============ 新增 / 编辑 / 删除 ============
 @app.route("/record/add", methods=["POST"])
 @login_required
 def add_record():
@@ -217,24 +217,25 @@ def add_record():
     category = request.form.get("category", "").strip()
     quantity = int(request.form.get("quantity") or 0)
     note = request.form.get("note", "").strip()
+    month = request.form.get("month", datetime.now().strftime("%Y-%m"))
     
     if not agent or not category:
         flash("中介和类别不能为空", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("dashboard", month=month))
         
     if current_user.role != "admin":
         if not Agent.query.filter_by(name=agent).first():
             flash("该中介不存在，请联系管理员添加", "error")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("dashboard", month=month))
         rule = PriceRule.query.filter_by(agent=agent, category=category).first()
         price = rule.price if rule else 0
         
     rec = Record(owner=owner, agent=agent, category=category,
-                 quantity=quantity, price=price or 0, note=note)
+                 quantity=quantity, price=price or 0, note=note, month=month)
     db.session.add(rec)
     db.session.commit()
-    flash("添加成功", "success")
-    return redirect(url_for("dashboard"))
+    flash(f"[{month}] 添加成功", "success")
+    return redirect(url_for("dashboard", month=month))
 
 @app.route("/record/<int:rid>/edit", methods=["GET", "POST"])
 @login_required
@@ -255,9 +256,10 @@ def edit_record(rid):
         rec.category = request.form.get("category", rec.category)
         rec.quantity = int(request.form.get("quantity") or 0)
         rec.note = request.form.get("note", "").strip()
+        rec.month = request.form.get("month", rec.month)
         db.session.commit()
         flash("更新成功", "success")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("dashboard", month=rec.month))
         
     users = User.query.order_by(User.id).all() if current_user.role == "admin" else [current_user]
     all_agents = Agent.query.order_by(Agent.name).all()
@@ -272,12 +274,12 @@ def delete_record(rid):
     if current_user.role != "admin" and rec.owner != current_user.username:
         flash("无权删除", "error")
         return redirect(url_for("dashboard"))
+    month = rec.month
     db.session.delete(rec)
     db.session.commit()
     flash("已删除", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("dashboard", month=month))
 
-# ============ 管理员：内联改价 ============
 @app.route("/record/<int:rid>/price", methods=["POST"])
 @login_required
 @admin_required
@@ -286,9 +288,8 @@ def update_price(rid):
     rec.price = float(request.form.get("price") or 0)
     db.session.commit()
     flash("价格已更新", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("dashboard", month=rec.month))
 
-# ============ 管理员：中介管理 ============
 @app.route("/agents", methods=["GET", "POST"])
 @login_required
 @admin_required
@@ -311,24 +312,20 @@ def manage_agents():
 def delete_agent(aid):
     a = Agent.query.get_or_404(aid)
     try:
-        # 1. 先删除该中介对应的所有价目规则，防止外键报错
+        # 暴力清理：先删价目，避免约束报错
         PriceRule.query.filter_by(agent=a.name).delete()
-        
-        # 2. 如果有需要，也可以把该中介的历史录入记录一并删除。
-        # 如果你想保留历史记录（只是以后不能再选这个中介了），把下面这行注释掉即可。
+        # 如果你想连带删除这个中介的历史录入数据，取消下面这行的注释：
         # Record.query.filter_by(agent=a.name).delete()
         
-        # 3. 删除中介本身
         db.session.delete(a)
         db.session.commit()
-        flash(f"中介 {a.name} 及其价目设置已删除", "success")
+        flash(f"中介【{a.name}】已彻底删除", "success")
     except Exception as e:
         db.session.rollback()
         flash(f"删除失败：{str(e)}", "error")
         
     return redirect(url_for("manage_agents"))
 
-# ============ 管理员：价目管理 ============
 @app.route("/prices", methods=["GET", "POST"])
 @login_required
 @admin_required
@@ -350,7 +347,6 @@ def manage_prices():
     return render_template("prices.html", agents=agents,
                            categories=CATEGORIES, rules=rules)
 
-# ============ 管理员：用户管理 ============
 @app.route("/admin/users")
 @login_required
 @admin_required
@@ -396,7 +392,6 @@ def change_user_password(uid):
             return redirect(url_for("manage_users"))
     return render_template("change_password.html", user=user)
 
-# ============ 注册开关 ============
 @app.route("/admin/toggle-registration", methods=["POST"])
 @login_required
 @admin_required
@@ -406,7 +401,6 @@ def toggle_registration():
     flash("注册功能已" + ("开启" if current == "0" else "关闭"), "success")
     return redirect(url_for("dashboard"))
 
-# ============ 导出 CSV ============
 @app.route("/export")
 @login_required
 @admin_required
@@ -414,15 +408,14 @@ def export_csv():
     records = Record.query.all()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["ID", "所属账号", "中介", "类别", "数量", "价格", "合计", "备注"])
+    writer.writerow(["ID", "月份", "所属账号", "中介", "类别", "数量", "价格", "合计", "备注"])
     for r in records:
-        writer.writerow([r.id, r.owner, r.agent, r.category,
+        writer.writerow([r.id, r.month, r.owner, r.agent, r.category,
                          r.quantity, r.price, r.total, r.note])
     output.seek(0)
     return Response(output.getvalue(), mimetype="text/csv",
                     headers={"Content-Disposition": "attachment; filename=monthly_data.csv"})
 
-# ============ 强制启动时初始化数据库 ============
 init_db()
 
 if __name__ == "__main__":
