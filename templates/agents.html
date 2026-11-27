@@ -6,6 +6,7 @@ table{border-collapse:collapse;width:60%;margin-top:16px;}
 th,td{border:1px solid #ccc;padding:8px;text-align:center;}
 th{background:#1F4E78;color:#fff;}
 .btn-del{background:#d9534f;color:#fff;border:none;padding:6px 12px;cursor:pointer;border-radius:3px;}
+.btn-del:hover{background:#c9302c;}
 .btn-add{background:#1F4E78;color:#fff;border:none;padding:6px 12px;cursor:pointer;border-radius:3px;}
 .flash-success{color:green;background:#e8f5e9;padding:10px;margin-bottom:10px;border-radius:4px;} 
 .flash-error{color:red;background:#ffebee;padding:10px;margin-bottom:10px;border-radius:4px;}
@@ -13,13 +14,16 @@ th{background:#1F4E78;color:#fff;}
 <body>
 <p><a href="{{ url_for('dashboard') }}">← 返回数据面板</a></p>
 <h2>中介管理</h2>
+
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% for cat, msg in messages %}<div class="flash-{{ cat }}">{{ msg }}</div>{% endfor %}
 {% endwith %}
+
 <form method="post" style="margin-bottom:20px;">
   <input name="name" placeholder="输入新中介名称" required style="padding:6px;width:200px;">
   <button type="submit" class="btn-add">添加中介</button>
 </form>
+
 <table>
 <tr><th>ID</th><th>中介名称</th><th>操作</th></tr>
 {% for a in agents %}
@@ -27,7 +31,8 @@ th{background:#1F4E78;color:#fff;}
   <td>{{ a.id }}</td>
   <td>{{ a.name }}</td>
   <td>
-    <button class="btn-del" onclick="deleteAgent({{ a.id }}, '{{ a.name }}')">删除</button>
+    <!-- 强制渲染按钮，点击触发 JS -->
+    <button type="button" class="btn-del" onclick="deleteAgent({{ a.id }}, '{{ a.name }}')">删除</button>
   </td>
 </tr>
 {% endfor %}
@@ -35,24 +40,31 @@ th{background:#1F4E78;color:#fff;}
 
 <script>
 async function deleteAgent(id, name) {
-    if (!confirm(`确定要彻底删除中介【${name}】吗？\n警告：删除后，相关历史记录会被标记为“已删除”。`)) return;
+    if (!confirm(`确定要彻底删除中介【${name}】吗？\n警告：删除后，旧数据会标记为“已删除_${name}”，但表格里以后就不能选这个中介了。`)) {
+        return;
+    }
     
     try {
+        // 发送 DELETE 请求到后端的 API
         const response = await fetch(`/api/agents/${id}`, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' }
         });
+        
+        // 解析后端返回的 JSON
         const data = await response.json();
         
-        if (data.status === 'success') {
+        if (response.ok && data.status === 'success') {
             alert(data.msg);
-            // 成功后直接移除这一行，页面不刷新
+            // 成功后直接在页面上移除这一行，不需要刷新页面
             document.getElementById(`agent-row-${id}`).remove();
         } else {
-            alert(`删除失败：${data.msg}`);
+            // 如果后端报错（比如数据库锁定），这里会弹出具体的失败原因
+            alert(`删除失败：${data.msg || '未知错误'}`);
         }
     } catch (error) {
-        alert('网络请求失败，请查看后台日志或联系管理员。');
+        alert('网络请求失败，请检查网络或稍后再试。');
+        console.error(error);
     }
 }
 </script>
