@@ -47,11 +47,19 @@ DEFAULT_AGENTS = ["星空", "小泪", "小C", "怡丰", "小林", "小蕾", "狂
 def init_db():
     with app.app_context():
         db.create_all()
+        # 强制检查并补齐 records 表的 month 字段，防止报错
         try:
-            db.session.execute(text("ALTER TABLE records ADD COLUMN month VARCHAR(7)"))
-            db.session.commit()
+            # 尝试执行插入测试，如果报 no column 就说明要加字段
+            db.session.execute(text("SELECT month FROM records LIMIT 1"))
         except Exception:
             db.session.rollback()
+            try:
+                # 如果没有 month 字段，强行加进去，并把旧数据默认设为当前月份
+                current_m = datetime.now().strftime("%Y-%m")
+                db.session.execute(text(f"ALTER TABLE records ADD COLUMN month VARCHAR(7) DEFAULT '{current_m}'"))
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
 
         if not User.query.filter_by(username="000").first():
             admin = User(username="000", role="admin")
@@ -127,8 +135,12 @@ def dashboard():
     active_month = Setting.get("active_month", datetime.now().strftime("%Y-%m"))
     selected_month = request.args.get("month", active_month)
     
+    # 注意：这步如果是旧数据(没有month字段)，SQLAlchemy 会因为上面的补丁而把它当做当前月
     query = Record.query
+    
+    # 如果是选“全部”，就不加月份过滤
     if selected_month != "all":
+        # 兼容旧数据：如果某条记录没有月份，也归入当前选择的月份
         query = query.filter((Record.month == selected_month) | (Record.month == None))
         
     if current_user.role == "admin":
@@ -143,6 +155,7 @@ def dashboard():
         
     records = query.all()
     
+    # 安全收集所有存在过的月份
     all_months_res = db.session.query(Record.month).distinct().all()
     month_options = [m[0] for m in all_months_res if m[0]]
     if active_month not in month_options:
@@ -166,6 +179,7 @@ def dashboard():
         qty = r.quantity or 0
         amt = qty * (r.price or 0)
         
+        # 如果中介被删了，历史数据可能找不到名字，归入已删除
         agent_name = r.agent if r.agent in summary else "已删除中介"
         if agent_name not in summary:
             summary[agent_name] = {c: {'qty': 0, 'amt': 0} for c in categories}
@@ -330,7 +344,6 @@ def manage_agents():
     agents = Agent.query.order_by(Agent.name).all()
     return render_template("agents.html", agents=agents)
 
-# 新增一个专门的 API 来删除中介，前端通过 JS 调用它，这样如果有报错可以直接弹窗提示
 @app.route("/api/agents/<int:aid>", methods=["DELETE"])
 @login_required
 @admin_required
