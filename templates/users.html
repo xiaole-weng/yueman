@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>用户管理</title>
+<style>
+body{font-family:sans-serif;margin:20px;}
+table{border-collapse:collapse;width:100%;margin-top:16px;}
+th,td{border:1px solid #ccc;padding:8px;text-align:center;font-size:14px;}
+th{background:#1F4E78;color:#fff;}
+.btn{padding:5px 10px;margin:2px;text-decoration:none;font-size:13px;border-radius:3px;display:inline-block;border:none;cursor:pointer;}
+.btn-edit{background:#f0ad4e;color:#fff;}
+.btn-del{background:#d9534f;color:#fff;}
+.flash-success{color:green;} .flash-error{color:red;}
+a{color:#1F4E78;}
+</style></head>
+<body>
+<p><a href="{{ url_for('dashboard') }}">← 返回数据面板</a></p>
+<h2>用户管理</h2>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}<p class="flash-{{ cat }}">{{ msg }}</p>{% endfor %}
+{% endwith %}
+<table>
+<tr><th>ID</th><th>用户名</th><th>角色</th><th>记录数</th><th>操作</th></tr>
+{% for u in users %}
+<tr>
+  <td>{{ u.id }}</td>
+  <td>{{ u.username }}{% if u.username == current_username %}（当前登录）{% endif %}</td>
+  <td>{{ "管理员" if u.role == "admin" else "普通用户" }}</td>
+  <td>{{ counts.get(u.username, 0) }}</td>
+  <td>
+    <a class="btn btn-edit" href="{{ url_for('change_user_password', uid=u.id) }}">修改密码</a>
+    {% if u.username != current_username %}
+    <form method="post" action="{{ url_for('delete_user', uid=u.id) }}" style="display:inline;"
+          onsubmit="return confirm('确定删除用户 {{ u.username }}？其名下记录也会一并删除。')">
+      <button class="btn btn-del" type="submit">删除用户</button>
+    </form>
+    {% endif %}
+  </td>
+</tr>
+{% endfor %}
+</table>
+</body></html>
