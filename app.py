@@ -31,8 +31,6 @@ def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if not current_user.is_authenticated or current_user.role != "admin":
-            if request.is_json or request.path.startswith('/api/'):
-                return jsonify({"status": "error", "msg": "需要管理员权限"}), 403
             flash("需要管理员权限", "error")
             return redirect(url_for("dashboard"))
         return f(*args, **kwargs)
@@ -47,18 +45,16 @@ DEFAULT_AGENTS = ["星空", "小泪", "小C", "怡丰", "小林", "小蕾", "狂
 def init_db():
     with app.app_context():
         db.create_all()
-        # 强制检查并补齐 records 表的 month 字段，防止报错
+        # 强行补全可能缺失的月份字段
         try:
-            # 尝试执行插入测试，如果报 no column 就说明要加字段
             db.session.execute(text("SELECT month FROM records LIMIT 1"))
         except Exception:
             db.session.rollback()
             try:
-                # 如果没有 month 字段，强行加进去，并把旧数据默认设为当前月份
                 current_m = datetime.now().strftime("%Y-%m")
                 db.session.execute(text(f"ALTER TABLE records ADD COLUMN month VARCHAR(7) DEFAULT '{current_m}'"))
                 db.session.commit()
-            except Exception as e:
+            except Exception:
                 db.session.rollback()
 
         if not User.query.filter_by(username="000").first():
@@ -104,13 +100,10 @@ def register():
         password = request.form.get("password", "")
         confirm = request.form.get("confirm", "")
         if not USERNAME_RE.match(username):
-            flash("用户名需为 2–32 位中文、字母、数字、下划线或连字符", "error")
+            flash("用户名格式错误", "error")
             return render_template("register.html")
-        if password == "":
-            flash("密码不能为空", "error")
-            return render_template("register.html")
-        if password != confirm:
-            flash("两次密码不一致", "error")
+        if password == "" or password != confirm:
+            flash("密码不能为空或两次不一致", "error")
             return render_template("register.html")
         if User.query.filter(func.lower(User.username) == username.lower()).first():
             flash("该用户名已被注册", "error")
@@ -119,7 +112,7 @@ def register():
         u.set_password(password)
         db.session.add(u)
         db.session.commit()
-        flash("注册成功，请登录", "success")
+        flash("注册成功", "success")
         return redirect(url_for("login"))
     return render_template("register.html")
 
@@ -135,12 +128,8 @@ def dashboard():
     active_month = Setting.get("active_month", datetime.now().strftime("%Y-%m"))
     selected_month = request.args.get("month", active_month)
     
-    # 注意：这步如果是旧数据(没有month字段)，SQLAlchemy 会因为上面的补丁而把它当做当前月
     query = Record.query
-    
-    # 如果是选“全部”，就不加月份过滤
     if selected_month != "all":
-        # 兼容旧数据：如果某条记录没有月份，也归入当前选择的月份
         query = query.filter((Record.month == selected_month) | (Record.month == None))
         
     if current_user.role == "admin":
@@ -155,7 +144,6 @@ def dashboard():
         
     records = query.all()
     
-    # 安全收集所有存在过的月份
     all_months_res = db.session.query(Record.month).distinct().all()
     month_options = [m[0] for m in all_months_res if m[0]]
     if active_month not in month_options:
@@ -179,7 +167,6 @@ def dashboard():
         qty = r.quantity or 0
         amt = qty * (r.price or 0)
         
-        # 如果中介被删了，历史数据可能找不到名字，归入已删除
         agent_name = r.agent if r.agent in summary else "已删除中介"
         if agent_name not in summary:
             summary[agent_name] = {c: {'qty': 0, 'amt': 0} for c in categories}
@@ -344,28 +331,29 @@ def manage_agents():
     agents = Agent.query.order_by(Agent.name).all()
     return render_template("agents.html", agents=agents)
 
-@app.route("/api/agents/<int:aid>", methods=["DELETE"])
+# 彻底改回最原始的 POST 表单删除，拒绝一切花里胡哨的 JS
+@app.route("/agents/delete/<int:aid>", methods=["POST"])
 @login_required
 @admin_required
-def api_delete_agent(aid):
+def delete_agent(aid):
     a = Agent.query.get_or_404(aid)
+    agent_name = a.name
     try:
-        agent_name = a.name
-        # 1. 删价格表
+        # 1. 暴力清除价目表
         PriceRule.query.filter_by(agent=agent_name).delete()
         
-        # 2. 清理历史数据（给旧中介名字改名，解除物理绑定）
-        old_records = Record.query.filter_by(agent=agent_name).all()
-        for r in old_records:
-            r.agent = f"已删除_{agent_name}"
-            
-        # 3. 删中介表
+        # 2. 暴力把已经填写的记录改名，强行解绑
+        Record.query.filter_by(agent=agent_name).update({"agent": f"已删除_{agent_name}"})
+        
+        # 3. 删除中介
         db.session.delete(a)
         db.session.commit()
-        return jsonify({"status": "success", "msg": f"中介【{agent_name}】已彻底移除！"})
+        flash(f"中介【{agent_name}】已移除", "success")
     except Exception as e:
         db.session.rollback()
-        return jsonify({"status": "error", "msg": f"删除失败：{str(e)}"}), 500
+        flash(f"数据库拦截了删除：{str(e)}", "error")
+    
+    return redirect(url_for("manage_agents"))
 
 @app.route("/prices", methods=["GET", "POST"])
 @login_required
