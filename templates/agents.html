@@ -5,18 +5,20 @@ body{font-family:sans-serif;margin:20px;}
 table{border-collapse:collapse;width:60%;margin-top:16px;}
 th,td{border:1px solid #ccc;padding:8px;text-align:center;}
 th{background:#1F4E78;color:#fff;}
-.btn-del{background:#d9534f;color:#fff;border:none;padding:4px 8px;cursor:pointer;border-radius:3px;}
-.flash-success{color:green;} .flash-error{color:red;}
+.btn-del{background:#d9534f;color:#fff;border:none;padding:6px 12px;cursor:pointer;border-radius:3px;}
+.btn-add{background:#1F4E78;color:#fff;border:none;padding:6px 12px;cursor:pointer;border-radius:3px;}
+.flash-success{color:green;background:#e8f5e9;padding:10px;margin-bottom:10px;border-radius:4px;} 
+.flash-error{color:red;background:#ffebee;padding:10px;margin-bottom:10px;border-radius:4px;}
 </style></head>
 <body>
 <p><a href="{{ url_for('dashboard') }}">← 返回数据面板</a></p>
 <h2>中介管理</h2>
 {% with messages = get_flashed_messages(with_categories=true) %}
-  {% for cat, msg in messages %}<p class="flash-{{ cat }}">{{ msg }}</p>{% endfor %}
+  {% for cat, msg in messages %}<div class="flash-{{ cat }}">{{ msg }}</div>{% endfor %}
 {% endwith %}
-<form method="post">
-  <input name="name" placeholder="新中介名称" required>
-  <button type="submit">添加中介</button>
+<form method="post" style="margin-bottom:20px;">
+  <input name="name" placeholder="输入新中介名称" required style="padding:6px;width:200px;">
+  <button type="submit" class="btn-add">添加中介</button>
 </form>
 <table>
 <tr><th>ID</th><th>中介名称</th><th>操作</th></tr>
@@ -26,7 +28,7 @@ th{background:#1F4E78;color:#fff;}
   <td>{{ a.name }}</td>
   <td>
     <form method="post" action="{{ url_for('delete_agent', aid=a.id) }}" style="display:inline;"
-          onsubmit="return confirm('删除中介 {{ a.name }}？已有记录不受影响。')">
+          onsubmit="return confirm('确定删除中介【{{ a.name }}】？删除后将无法在录入时选择该中介。')">
       <button class="btn-del" type="submit">删除</button>
     </form>
   </td>
