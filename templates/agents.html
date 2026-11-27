@@ -16,7 +16,9 @@ th{background:#1F4E78;color:#fff;}
 <h2>中介管理</h2>
 
 {% with messages = get_flashed_messages(with_categories=true) %}
-  {% for cat, msg in messages %}<div class="flash-{{ cat }}">{{ msg }}</div>{% endfor %}
+  {% for cat, msg in messages %}
+    <div class="flash-{{ cat }}">{{ msg }}</div>
+  {% endfor %}
 {% endwith %}
 
 <form method="post" style="margin-bottom:20px;">
@@ -27,40 +29,16 @@ th{background:#1F4E78;color:#fff;}
 <table>
 <tr><th>ID</th><th>中介名称</th><th>操作</th></tr>
 {% for a in agents %}
-<tr id="agent-row-{{ a.id }}">
+<tr>
   <td>{{ a.id }}</td>
   <td>{{ a.name }}</td>
   <td>
-    <button type="button" class="btn-del" onclick="deleteAgent({{ a.id }}, '{{ a.name }}')">删除</button>
+    <!-- 最原始的 Form 提交，点了绝对发请求，服务器如果报错会闪现红字 -->
+    <form method="post" action="{{ url_for('delete_agent', aid=a.id) }}" style="margin:0;" onsubmit="return confirm('确定要彻底删除中介【{{ a.name }}】吗？');">
+      <button type="submit" class="btn-del">删除</button>
+    </form>
   </td>
 </tr>
 {% endfor %}
 </table>
-
-<script>
-async function deleteAgent(id, name) {
-    if (!confirm(`确定要彻底删除中介【${name}】吗？\n警告：删除后，旧数据会标记为“已删除_${name}”，表格里以后就不能选这个中介了。`)) {
-        return;
-    }
-    
-    try {
-        const response = await fetch(`/api/agents/${id}`, {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        const data = await response.json();
-        
-        if (response.ok && data.status === 'success') {
-            alert(data.msg);
-            document.getElementById(`agent-row-${id}`).remove();
-        } else {
-            alert(`删除失败：${data.msg || '未知错误'}`);
-        }
-    } catch (error) {
-        alert('网络请求失败，请检查网络或稍后再试。');
-        console.error(error);
-    }
-}
-</script>
 </body></html>
