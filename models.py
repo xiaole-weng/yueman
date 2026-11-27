@@ -27,8 +27,8 @@ class Record(db.Model):
     quantity = db.Column(db.Integer, default=0)
     price = db.Column(db.Float, default=0)
     note = db.Column(db.String(200), default="")
-    # 新增：月份字段，格式如 "2026-11"
-    month = db.Column(db.String(7), nullable=False, default=lambda: datetime.now().strftime("%Y-%m"))
+    # 新增：月份字段。如果旧数据没有这个字段，SQLAlchemy 会报错，所以我们在启动时补全
+    month = db.Column(db.String(7), nullable=True, default=lambda: datetime.now().strftime("%Y-%m"))
 
     @property
     def total(self):
