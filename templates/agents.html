@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>中介管理</title>
+<style>
+body{font-family:sans-serif;margin:20px;}
+table{border-collapse:collapse;width:60%;margin-top:16px;}
+th,td{border:1px solid #ccc;padding:8px;text-align:center;}
+th{background:#1F4E78;color:#fff;}
+.btn-del{background:#d9534f;color:#fff;border:none;padding:4px 8px;cursor:pointer;border-radius:3px;}
+.flash-success{color:green;} .flash-error{color:red;}
+</style></head>
+<body>
+<p><a href="{{ url_for('dashboard') }}">← 返回数据面板</a></p>
+<h2>中介管理</h2>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}<p class="flash-{{ cat }}">{{ msg }}</p>{% endfor %}
+{% endwith %}
+<form method="post">
+  <input name="name" placeholder="新中介名称" required>
+  <button type="submit">添加中介</button>
+</form>
+<table>
+<tr><th>ID</th><th>中介名称</th><th>操作</th></tr>
+{% for a in agents %}
+<tr>
+  <td>{{ a.id }}</td>
+  <td>{{ a.name }}</td>
+  <td>
+    <form method="post" action="{{ url_for('delete_agent', aid=a.id) }}" style="display:inline;"
+          onsubmit="return confirm('删除中介 {{ a.name }}？已有记录不受影响。')">
+      <button class="btn-del" type="submit">删除</button>
+    </form>
+  </td>
+</tr>
+{% endfor %}
+</table>
+</body></html>
