@@ -310,9 +310,22 @@ def manage_agents():
 @admin_required
 def delete_agent(aid):
     a = Agent.query.get_or_404(aid)
-    db.session.delete(a)
-    db.session.commit()
-    flash("中介已删除（已有记录不受影响）", "success")
+    try:
+        # 1. 先删除该中介对应的所有价目规则，防止外键报错
+        PriceRule.query.filter_by(agent=a.name).delete()
+        
+        # 2. 如果有需要，也可以把该中介的历史录入记录一并删除。
+        # 如果你想保留历史记录（只是以后不能再选这个中介了），把下面这行注释掉即可。
+        # Record.query.filter_by(agent=a.name).delete()
+        
+        # 3. 删除中介本身
+        db.session.delete(a)
+        db.session.commit()
+        flash(f"中介 {a.name} 及其价目设置已删除", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"删除失败：{str(e)}", "error")
+        
     return redirect(url_for("manage_agents"))
 
 # ============ 管理员：价目管理 ============
