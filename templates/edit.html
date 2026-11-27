@@ -19,6 +19,10 @@ input,select{width:100%;padding:6px;margin:4px 0;box-sizing:border-box;}</style>
   中介：{{ record.agent }}（不可修改）<br>
   价格：{{ record.price }}（由管理员设定）<br>
   {% endif %}
+  
+  <!-- 增加月份修改 -->
+  归属月份：<input name="month" type="month" value="{{ record.month or '2026-11' }}" required><br>
+  
   类别：<input name="category" value="{{ record.category }}" required><br>
   数量：<input name="quantity" type="number" value="{{ record.quantity }}"><br>
   备注名称：<input name="note" value="{{ record.note }}" placeholder="如 客户张三"><br>
