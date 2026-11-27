@@ -33,11 +33,11 @@ input,select,button{padding:4px;margin:2px;}
   {% for cat, msg in messages %}<p class="flash-{{ cat }}">{{ msg }}</p>{% endfor %}
 {% endwith %}
 
-<!-- 顶部控制栏 -->
-<div style="background:#eef; padding:10px; margin-bottom:20px; border-radius:5px; overflow:hidden; display:flex; justify-content:space-between; align-items:center;">
-    <form method="get" action="{{ url_for('dashboard') }}">
+<div style="background:#eef; padding:10px; margin-bottom:20px; border-radius:5px;">
+    <form method="get" action="{{ url_for('dashboard') }}" style="display:inline;">
         <b>📅 查看统计表：</b>
         <select name="month" onchange="this.form.submit()" style="font-size:16px; padding:4px;">
+            <option value="all" {% if selected_month == 'all' %}selected{% endif %}>-- 查看全部历史 --</option>
             {% for m in month_options %}
                 <option value="{{ m }}" {% if m == selected_month %}selected{% endif %}>{{ m }}</option>
             {% endfor %}
@@ -56,7 +56,7 @@ input,select,button{padding:4px;margin:2px;}
     </form>
     
     {% if is_admin %}
-    <div>
+    <div style="float:right;">
         <form method="post" action="{{ url_for('create_new_month') }}" style="margin:0;">
             <b>➕ 创建新表：</b>
             <input type="month" name="new_month" required style="padding:3px;">
@@ -66,7 +66,7 @@ input,select,button{padding:4px;margin:2px;}
     {% endif %}
 </div>
 
-<h3>📊 {{ selected_month }} 汇总统计表（{{ "全部用户" if selected_user == "all" else selected_user }}）</h3>
+<h3>📊 {{ "全部历史数据" if selected_month == "all" else selected_month }} 汇总统计表（{{ "全部用户" if selected_user == "all" else selected_user }}）</h3>
 
 <table>
     <thead>
