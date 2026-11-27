@@ -1,18 +1,22 @@
 <!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>数据面板</title>
+<html><head><meta charset="utf-8"><title>月满表 - 汇总面板</title>
 <style>
-body{font-family:sans-serif;margin:20px;}
-table{border-collapse:collapse;width:100%;margin-top:16px;}
-th,td{border:1px solid #ccc;padding:8px;text-align:center;font-size:14px;}
-th{background:#1F4E78;color:#fff;}
-input,select{padding:4px;margin:2px;}
-.btn{padding:5px 10px;margin:2px;text-decoration:none;font-size:13px;border-radius:3px;display:inline-block;border:none;cursor:pointer;}
-.btn-edit{background:#f0ad4e;color:#fff;}
-.btn-del{background:#d9534f;color:#fff;}
+body{font-family:sans-serif;margin:20px;font-size:14px;}
+table{border-collapse:collapse;width:100%;margin-bottom:20px;}
+th,td{border:1px solid #999;padding:6px 8px;text-align:center;}
+th{background:#1F4E78;color:#fff;font-weight:normal;}
+.total-row td, .total-col {background:#f0f0f0;font-weight:bold;}
+.text-left{text-align:left;}
+.text-right{text-align:right;}
 .flash-success{color:green;} .flash-error{color:red;}
-a{color:#1F4E78;}
+input,select,button{padding:4px;margin:2px;}
+.btn-edit{background:#f0ad4e;color:#fff;text-decoration:none;padding:4px 8px;border-radius:3px;}
+.btn-del{background:#d9534f;color:#fff;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;}
+.detail-table {font-size:12px;}
+.detail-table th {background:#5a7b9c;}
 </style></head>
 <body>
+
 <p>当前用户：<b>{{ current_user.username }}</b>（{{ "管理员" if is_admin else "普通用户" }}）
  | <a href="{{ url_for('logout') }}">退出</a>
  {% if is_admin %}
@@ -31,28 +35,109 @@ a{color:#1F4E78;}
   {% for cat, msg in messages %}<p class="flash-{{ cat }}">{{ msg }}</p>{% endfor %}
 {% endwith %}
 
-<p>总数量：<b id="total-qty">{{ total_qty }}</b>　总金额：<b id="total-amt">{{ total_amt }}</b></p>
+{% if is_admin %}
+<form method="get" action="{{ url_for('dashboard') }}" style="margin-bottom:20px;padding:10px;background:#eef;">
+    <b>数据筛选：</b>
+    <select name="user" onchange="this.form.submit()">
+        <option value="all" {% if selected_user == 'all' %}selected{% endif %}>-- 全部用户 --</option>
+        {% for u in users %}
+            <option value="{{ u.username }}" {% if selected_user == u.username %}selected{% endif %}>{{ u.username }}</option>
+        {% endfor %}
+    </select>
+    <span style="color:#666;font-size:12px;">（切换用户查看单独汇总）</span>
+</form>
+{% endif %}
 
-<h3>新增记录</h3>
-<form method="post" action="{{ url_for('add_record') }}">
+<h3>📊 汇总统计表（{{ "全部用户" if selected_user == "all" else selected_user }}）</h3>
+
+<table>
+    <thead>
+        <tr>
+            <th rowspan="2" width="100">中介</th>
+            {% for c in categories %}
+            <th colspan="2">{{ c }}</th>
+            {% endfor %}
+            <th colspan="2" class="total-col">总和</th>
+        </tr>
+        <tr>
+            {% for c in categories %}
+            <th>数量</th><th>价格</th>
+            {% endfor %}
+            <th>数量</th><th>金额</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for agent in all_agents %}
+        <tr>
+            <td><b>{{ agent }}</b></td>
+            {% for c in categories %}
+                {% set cell = summary[agent][c] %}
+                <td>{{ cell.qty if cell.qty > 0 else '' }}</td>
+                <td>{{ cell.amt if cell.amt > 0 else '' }}</td>
+            {% endfor %}
+            <td class="total-col">{{ agent_totals[agent].qty }}</td>
+            <td class="total-col">{{ agent_totals[agent].amt }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr class="total-row">
+            <td>总合计</td>
+            {% for c in categories %}
+            <td>{{ category_totals[c].qty }}</td>
+            <td>{{ category_totals[c].amt }}</td>
+            {% endfor %}
+            <td>{{ grand_total.qty }}</td>
+            <td>{{ grand_total.amt }}</td>
+        </tr>
+    </tfoot>
+</table>
+
+{% if is_admin and selected_user == 'all' %}
+<h3>👥 各用户独立总计</h3>
+<table style="width:50%;">
+    <tr><th>用户名</th><th>总数量</th><th>总金额</th></tr>
+    {% for uname, sums in user_summary.items() %}
+    <tr>
+        <td>{{ uname }}</td>
+        <td>{{ sums.qty }}</td>
+        <td>{{ sums.amt }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+<hr style="margin:40px 0;">
+
+<h3>📝 数据录入与明细</h3>
+<form method="post" action="{{ url_for('add_record') }}" style="padding:10px;background:#f9f9f9;border:1px solid #ddd;">
   {% if is_admin %}
-  所属账号：<input name="owner" value="000" size="6">
+  所属账号：
+  <select name="owner" required>
+    <option value="">-- 选择用户 --</option>
+    {% for u in users %}
+      <option value="{{ u.username }}">{{ u.username }}</option>
+    {% endfor %}
+  </select>
   {% endif %}
+  
   中介：
   <select name="agent" required>
-    {% for a in all_agents %}<option value="{{ a.name }}">{{ a.name }}</option>{% endfor %}
+    {% for a in all_agents %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
   </select>
-  类别：<input name="category" required size="10">
-  数量：<input name="quantity" type="number" value="0" size="5">
+  类别：
+  <select name="category" required>
+    {% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+  </select>
+  数量：<input name="quantity" type="number" value="0" size="5" required>
   {% if is_admin %}价格：<input name="price" type="number" step="0.01" value="0" size="5">{% endif %}
-  备注：<input name="note" size="12">
-  <button type="submit">添加</button>
+  备注名称：<input name="note" placeholder="如 客户张三" size="15">
+  <button type="submit">添加记录</button>
 </form>
 
-<h3>数据列表</h3>
-<table>
+<table class="detail-table" style="margin-top:15px;">
 <thead>
-<tr><th>ID</th><th>所属账号</th><th>中介</th><th>类别</th><th>数量</th><th>价格</th><th>合计</th><th>备注</th><th>操作</th></tr>
+<tr><th>ID</th><th>所属账号</th><th>中介</th><th>类别</th><th>数量</th><th>单价</th><th>合计</th><th>备注</th><th>操作</th></tr>
 </thead>
 <tbody id="records-body">
 {% for r in records %}
@@ -65,19 +150,19 @@ a{color:#1F4E78;}
   <td>
   {% if is_admin %}
     <form method="post" action="{{ url_for('update_price', rid=r.id) }}" style="display:flex;gap:4px;justify-content:center;">
-      <input name="price" type="number" step="0.01" value="{{ r.price }}" style="width:80px;">
+      <input name="price" type="number" step="0.01" value="{{ r.price }}" style="width:60px;">
       <button type="submit">改价</button>
     </form>
   {% else %}
     {{ r.price }}
   {% endif %}
   </td>
-  <td>{{ r.total }}</td>
+  <td>{{ r.quantity * r.price }}</td>
   <td>{{ r.note }}</td>
   <td>
-    <a class="btn btn-edit" href="{{ url_for('edit_record', rid=r.id) }}">编辑</a>
+    <a class="btn-edit" href="{{ url_for('edit_record', rid=r.id) }}">编辑</a>
     <form method="post" action="{{ url_for('delete_record', rid=r.id) }}" style="display:inline;" onsubmit="return confirm('确定删除？')">
-      <button class="btn btn-del" type="submit">删除</button>
+      <button class="btn-del" type="submit">删除</button>
     </form>
   </td>
 </tr>
@@ -85,43 +170,4 @@ a{color:#1F4E78;}
 </tbody>
 </table>
 
-<script>
-async function refreshData() {
-  try {
-    const resp = await fetch("{{ url_for('api_records') }}", { cache: "no-store" });
-    if (!resp.ok) return;
-    const data = await resp.json();
-    document.getElementById("total-qty").textContent = data.total_qty;
-    document.getElementById("total-amt").textContent = data.total_amt;
-    const tbody = document.getElementById("records-body");
-    tbody.innerHTML = "";
-    for (const r of data.records) {
-      const tr = document.createElement("tr");
-      const priceCell = data.is_admin
-        ? `<form method="post" action="/record/${r.id}/price" style="display:flex;gap:4px;justify-content:center;">
-             <input name="price" type="number" step="0.01" value="${r.price}" style="width:80px;">
-             <button type="submit">改价</button>
-           </form>`
-        : `${r.price}`;
-      tr.innerHTML = `
-        <td>${r.id}</td>
-        <td>${r.owner}</td>
-        <td>${r.agent}</td>
-        <td>${r.category}</td>
-        <td>${r.quantity}</td>
-        <td>${priceCell}</td>
-        <td>${r.total}</td>
-        <td>${r.note}</td>
-        <td>
-          <a class="btn btn-edit" href="/record/${r.id}/edit">编辑</a>
-          <form method="post" action="/record/${r.id}/delete" style="display:inline;" onsubmit="return confirm('确定删除？')">
-            <button class="btn btn-del" type="submit">删除</button>
-          </form>
-        </td>`;
-      tbody.appendChild(tr);
-    }
-  } catch (e) {}
-}
-setInterval(refreshData, 10000);
-</script>
 </body></html>
