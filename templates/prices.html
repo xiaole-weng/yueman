@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>价目管理</title>
+<style>
+body{font-family:sans-serif;margin:20px;}
+table{border-collapse:collapse;width:100%;margin-top:16px;}
+th,td{border:1px solid #ccc;padding:6px;text-align:center;font-size:13px;}
+th{background:#1F4E78;color:#fff;}
+input{width:70px;padding:4px;}
+button{padding:4px 8px;cursor:pointer;}
+.flash-success{color:green;} .flash-error{color:red;}
+</style></head>
+<body>
+<p><a href="{{ url_for('dashboard') }}">← 返回数据面板</a></p>
+<h2>价目管理（中介 × 类别 单价）</h2>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}<p class="flash-{{ cat }}">{{ msg }}</p>{% endfor %}
+{% endwith %}
+<table>
+<tr><th>中介</th>{% for c in categories %}<th>{{ c }}</th>{% endfor %}</tr>
+{% for a in agents %}
+<tr>
+  <td><b>{{ a.name }}</b></td>
+  {% for c in categories %}
+  <td>
+    <form method="post" style="display:flex;gap:2px;justify-content:center;">
+      <input type="hidden" name="agent" value="{{ a.name }}">
+      <input type="hidden" name="category" value="{{ c }}">
+      <input name="price" type="number" step="0.01" value="{{ rules.get((a.name, c), 0) }}">
+      <button type="submit">存</button>
+    </form>
+  </td>
+  {% endfor %}
+</tr>
+{% endfor %}
+</table>
+</body></html>
