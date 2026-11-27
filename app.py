@@ -40,17 +40,17 @@ USERNAME_RE = re.compile(r"^[\u4e00-\u9fa5A-Za-z0-9_-]{2,32}$")
 CATEGORIES = ["100-200", "250-300", "350-", "400+", "监管", "安卓500下", "安卓500上"]
 DEFAULT_PRICES = {"100-200": 40, "250-300": 80, "350-": 100,
                   "400+": 120, "监管": 100, "安卓500下": 28, "安卓500上": 68}
-DEFAULT_AGENTS = ["阿姆", "从新", "森", "金晟", "明mu", "海风", "看不见你的笑", "诚信", "XH", "keli", "梦念", "39度", "吃草莓", "如花", "天启", "大众", "再见亦难见", "K哥", "多财多亿", "哈基咪咪", "财神", "小桃", "皮皮"]
+DEFAULT_AGENTS = ["星空", "小泪", "小C", "怡丰", "小林", "小蕾", "狂妄", "小乐"]
 
 def init_db():
     with app.app_context():
         db.create_all()
-        # 尝试给旧表加 month 字段（使用原生 SQL）
+        # 补全历史数据的 month 字段
         try:
             db.session.execute(text("ALTER TABLE records ADD COLUMN month VARCHAR(7)"))
             db.session.commit()
         except Exception:
-            db.session.rollback() # 如果字段已存在会报错，直接忽略
+            db.session.rollback()
 
         if not User.query.filter_by(username="000").first():
             admin = User(username="000", role="admin")
@@ -58,6 +58,12 @@ def init_db():
             db.session.add(admin)
         if Setting.get("registration_open") is None:
             Setting.set("registration_open", "0")
+            
+        # 确保现在有一个默认的活跃月份
+        current_m = datetime.now().strftime("%Y-%m")
+        if Setting.get("active_month") is None:
+            Setting.set("active_month", current_m)
+
         for name in DEFAULT_AGENTS:
             if not Agent.query.filter_by(name=name).first():
                 db.session.add(Agent(name=name))
@@ -118,11 +124,14 @@ def logout():
 @app.route("/")
 @login_required
 def dashboard():
-    selected_month = request.args.get("month", datetime.now().strftime("%Y-%m"))
+    # 获取用户选择的月份，默认选中当前活跃月份
+    active_month = Setting.get("active_month", datetime.now().strftime("%Y-%m"))
+    selected_month = request.args.get("month", active_month)
     
     query = Record.query
     if selected_month != "all":
-        query = query.filter_by(month=selected_month)
+        # 兼容处理：如果没有 month 字段的旧数据，强制归入当前活跃月份
+        query = query.filter((Record.month == selected_month) | (Record.month == None))
         
     if current_user.role == "admin":
         selected_user = request.args.get("user", "all")
@@ -136,20 +145,17 @@ def dashboard():
         
     records = query.all()
     
-    # 安全地获取已有月份
+    # 获取月份列表
     all_months_res = db.session.query(Record.month).distinct().all()
     month_options = [m[0] for m in all_months_res if m[0]]
-    
-    current_month = datetime.now().strftime("%Y-%m")
-    if current_month not in month_options:
-        month_options.append(current_month)
-    if selected_month != "all" and selected_month not in month_options:
-        month_options.append(selected_month)
+    if active_month not in month_options:
+        month_options.append(active_month)
     month_options.sort(reverse=True)
 
     all_agents = [a.name for a in Agent.query.order_by(Agent.id).all()]
     categories = CATEGORIES
 
+    # 初始化汇总字典
     summary = {a: {c: {'qty': 0, 'amt': 0} for c in categories} for a in all_agents}
     agent_totals = {a: {'qty': 0, 'amt': 0} for a in all_agents}
     category_totals = {c: {'qty': 0, 'amt': 0} for c in categories}
@@ -164,13 +170,19 @@ def dashboard():
         qty = r.quantity or 0
         amt = qty * (r.price or 0)
         
-        if r.agent in summary and r.category in summary[r.agent]:
-            summary[r.agent][r.category]['qty'] += qty
-            summary[r.agent][r.category]['amt'] += amt
+        # 处理被删掉的中介（归入已删除中介）
+        agent_name = r.agent if r.agent in summary else "已删除中介"
+        if agent_name not in summary:
+            summary[agent_name] = {c: {'qty': 0, 'amt': 0} for c in categories}
+            agent_totals[agent_name] = {'qty': 0, 'amt': 0}
+
+        if r.category in summary[agent_name]:
+            summary[agent_name][r.category]['qty'] += qty
+            summary[agent_name][r.category]['amt'] += amt
             
-        if r.agent in agent_totals:
-            agent_totals[r.agent]['qty'] += qty
-            agent_totals[r.agent]['amt'] += amt
+        agent_totals[agent_name]['qty'] += qty
+        agent_totals[agent_name]['amt'] += amt
+        
         if r.category in category_totals:
             category_totals[r.category]['qty'] += qty
             category_totals[r.category]['amt'] += amt
@@ -194,6 +206,7 @@ def dashboard():
                            users=users,
                            selected_user=selected_user,
                            selected_month=selected_month,
+                           active_month=active_month,
                            month_options=month_options,
                            all_agents=all_agents,
                            categories=categories,
@@ -203,6 +216,19 @@ def dashboard():
                            grand_total=grand_total,
                            user_summary=user_summary,
                            registration_open=(Setting.get("registration_open", "0") == "1"))
+
+# 管理员：开启新月份（创建新统计表）
+@app.route("/admin/new-month", methods=["POST"])
+@login_required
+@admin_required
+def create_new_month():
+    new_month = request.form.get("new_month", "").strip()
+    if not re.match(r"^\d{4}-\d{2}$", new_month):
+        flash("月份格式错误，必须为 YYYY-MM", "error")
+    else:
+        Setting.set("active_month", new_month)
+        flash(f"成功创建并切换到新表：{new_month}", "success")
+    return redirect(url_for("dashboard", month=new_month))
 
 @app.route("/record/add", methods=["POST"])
 @login_required
@@ -222,27 +248,26 @@ def add_record():
     quantity = int(request.form.get("quantity") or 0)
     note = request.form.get("note", "").strip()
     
-    month = request.form.get("month", datetime.now().strftime("%Y-%m"))
-    if month == "all":
-        month = datetime.now().strftime("%Y-%m")
+    active_month = Setting.get("active_month", datetime.now().strftime("%Y-%m"))
 
     if not agent or not category:
         flash("中介和类别不能为空", "error")
-        return redirect(url_for("dashboard", month=month))
+        return redirect(url_for("dashboard"))
         
     if current_user.role != "admin":
         if not Agent.query.filter_by(name=agent).first():
             flash("该中介不存在，请联系管理员添加", "error")
-            return redirect(url_for("dashboard", month=month))
+            return redirect(url_for("dashboard"))
         rule = PriceRule.query.filter_by(agent=agent, category=category).first()
         price = rule.price if rule else 0
         
+    # 自动保存：只要点提交，直接就存入数据库
     rec = Record(owner=owner, agent=agent, category=category,
-                 quantity=quantity, price=price or 0, note=note, month=month)
+                 quantity=quantity, price=price or 0, note=note, month=active_month)
     db.session.add(rec)
     db.session.commit()
-    flash(f"[{month}] 添加成功", "success")
-    return redirect(url_for("dashboard", month=month))
+    flash(f"数据已自动保存至 {active_month} 统计表", "success")
+    return redirect(url_for("dashboard"))
 
 @app.route("/record/<int:rid>/edit", methods=["GET", "POST"])
 @login_required
@@ -263,14 +288,9 @@ def edit_record(rid):
         rec.category = request.form.get("category", rec.category)
         rec.quantity = int(request.form.get("quantity") or 0)
         rec.note = request.form.get("note", "").strip()
-        
-        new_month = request.form.get("month", rec.month)
-        if new_month and new_month != "all":
-            rec.month = new_month
-            
         db.session.commit()
-        flash("更新成功", "success")
-        return redirect(url_for("dashboard", month=rec.month))
+        flash("更新成功，数据已自动保存", "success")
+        return redirect(url_for("dashboard", month=rec.month or "all"))
         
     users = User.query.order_by(User.id).all() if current_user.role == "admin" else [current_user]
     all_agents = Agent.query.order_by(Agent.name).all()
@@ -285,10 +305,10 @@ def delete_record(rid):
     if current_user.role != "admin" and rec.owner != current_user.username:
         flash("无权删除", "error")
         return redirect(url_for("dashboard"))
-    month = rec.month or datetime.now().strftime("%Y-%m")
+    month = rec.month or "all"
     db.session.delete(rec)
     db.session.commit()
-    flash("已删除", "success")
+    flash("记录已删除", "success")
     return redirect(url_for("dashboard", month=month))
 
 @app.route("/record/<int:rid>/price", methods=["POST"])
@@ -323,14 +343,19 @@ def manage_agents():
 def delete_agent(aid):
     a = Agent.query.get_or_404(aid)
     try:
-        # 暴力清理绑定的规则
+        # 1. 清理价格表
         PriceRule.query.filter_by(agent=a.name).delete()
-        # 强制清理旧记录的数据关联（如果你想让历史记录保留，就注释下面这行）
-        # Record.query.filter_by(agent=a.name).delete()
         
+        # 2. 强制解绑历史数据：将历史记录里的中介名称改为 "已删除中介(原名)"
+        # 这样既有历史数据不会报错，这个中介也能被彻底移除
+        old_records = Record.query.filter_by(agent=a.name).all()
+        for r in old_records:
+            r.agent = f"已删除_{a.name}"
+        
+        # 3. 删除中介
         db.session.delete(a)
         db.session.commit()
-        flash(f"中介【{a.name}】及价目已删除", "success")
+        flash(f"中介【{a.name}】已移除，历史数据已归档", "success")
     except Exception as e:
         db.session.rollback()
         flash(f"删除失败：{str(e)}", "error")
