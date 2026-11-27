@@ -11,6 +11,8 @@ from sqlalchemy import func
 from models import db, User, Record, Setting, Agent, PriceRule
 
 app = Flask(__name__)
+app.config["PROPAGATE_EXCEPTIONS"] = True 
+app.debug = True
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 db_path = os.environ.get("DATABASE_PATH", "/data/app.db")
 app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
