@@ -33,7 +33,7 @@ th{background:#1F4E78;color:#fff;}
   <td>{{ a.id }}</td>
   <td>{{ a.name }}</td>
   <td>
-    <!-- 最原始的 Form 提交，点了绝对发请求，服务器如果报错会闪现红字 -->
+    <!-- 纯粹的表单提交，只要点必定发请求 -->
     <form method="post" action="{{ url_for('delete_agent', aid=a.id) }}" style="margin:0;" onsubmit="return confirm('确定要彻底删除中介【{{ a.name }}】吗？');">
       <button type="submit" class="btn-del">删除</button>
     </form>
