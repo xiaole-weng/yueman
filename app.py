@@ -129,6 +129,7 @@ def dashboard():
     selected_month = request.args.get("month", active_month)
     
     query = Record.query
+    # 如果选择 all，就不加月份过滤
     if selected_month != "all":
         query = query.filter((Record.month == selected_month) | (Record.month == None))
         
@@ -331,7 +332,6 @@ def manage_agents():
     agents = Agent.query.order_by(Agent.name).all()
     return render_template("agents.html", agents=agents)
 
-# 彻底改回最原始的 POST 表单删除，拒绝一切花里胡哨的 JS
 @app.route("/agents/delete/<int:aid>", methods=["POST"])
 @login_required
 @admin_required
@@ -339,19 +339,19 @@ def delete_agent(aid):
     a = Agent.query.get_or_404(aid)
     agent_name = a.name
     try:
-        # 1. 暴力清除价目表
+        # 1. 暴力清理价目表
         PriceRule.query.filter_by(agent=agent_name).delete()
         
-        # 2. 暴力把已经填写的记录改名，强行解绑
+        # 2. 暴力清理历史记录，强制改名解绑
         Record.query.filter_by(agent=agent_name).update({"agent": f"已删除_{agent_name}"})
         
         # 3. 删除中介
         db.session.delete(a)
         db.session.commit()
-        flash(f"中介【{agent_name}】已移除", "success")
+        flash(f"中介【{agent_name}】已彻底移除", "success")
     except Exception as e:
         db.session.rollback()
-        flash(f"数据库拦截了删除：{str(e)}", "error")
+        flash(f"删除失败：{str(e)}", "error")
     
     return redirect(url_for("manage_agents"))
 
