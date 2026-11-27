@@ -31,6 +31,8 @@ def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if not current_user.is_authenticated or current_user.role != "admin":
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({"status": "error", "msg": "需要管理员权限"}), 403
             flash("需要管理员权限", "error")
             return redirect(url_for("dashboard"))
         return f(*args, **kwargs)
@@ -45,7 +47,6 @@ DEFAULT_AGENTS = ["星空", "小泪", "小C", "怡丰", "小林", "小蕾", "狂
 def init_db():
     with app.app_context():
         db.create_all()
-        # 补全历史数据的 month 字段
         try:
             db.session.execute(text("ALTER TABLE records ADD COLUMN month VARCHAR(7)"))
             db.session.commit()
@@ -59,7 +60,6 @@ def init_db():
         if Setting.get("registration_open") is None:
             Setting.set("registration_open", "0")
             
-        # 确保现在有一个默认的活跃月份
         current_m = datetime.now().strftime("%Y-%m")
         if Setting.get("active_month") is None:
             Setting.set("active_month", current_m)
@@ -124,13 +124,11 @@ def logout():
 @app.route("/")
 @login_required
 def dashboard():
-    # 获取用户选择的月份，默认选中当前活跃月份
     active_month = Setting.get("active_month", datetime.now().strftime("%Y-%m"))
     selected_month = request.args.get("month", active_month)
     
     query = Record.query
     if selected_month != "all":
-        # 兼容处理：如果没有 month 字段的旧数据，强制归入当前活跃月份
         query = query.filter((Record.month == selected_month) | (Record.month == None))
         
     if current_user.role == "admin":
@@ -145,7 +143,6 @@ def dashboard():
         
     records = query.all()
     
-    # 获取月份列表
     all_months_res = db.session.query(Record.month).distinct().all()
     month_options = [m[0] for m in all_months_res if m[0]]
     if active_month not in month_options:
@@ -155,7 +152,6 @@ def dashboard():
     all_agents = [a.name for a in Agent.query.order_by(Agent.id).all()]
     categories = CATEGORIES
 
-    # 初始化汇总字典
     summary = {a: {c: {'qty': 0, 'amt': 0} for c in categories} for a in all_agents}
     agent_totals = {a: {'qty': 0, 'amt': 0} for a in all_agents}
     category_totals = {c: {'qty': 0, 'amt': 0} for c in categories}
@@ -170,7 +166,6 @@ def dashboard():
         qty = r.quantity or 0
         amt = qty * (r.price or 0)
         
-        # 处理被删掉的中介（归入已删除中介）
         agent_name = r.agent if r.agent in summary else "已删除中介"
         if agent_name not in summary:
             summary[agent_name] = {c: {'qty': 0, 'amt': 0} for c in categories}
@@ -217,7 +212,6 @@ def dashboard():
                            user_summary=user_summary,
                            registration_open=(Setting.get("registration_open", "0") == "1"))
 
-# 管理员：开启新月份（创建新统计表）
 @app.route("/admin/new-month", methods=["POST"])
 @login_required
 @admin_required
@@ -261,7 +255,6 @@ def add_record():
         rule = PriceRule.query.filter_by(agent=agent, category=category).first()
         price = rule.price if rule else 0
         
-    # 自动保存：只要点提交，直接就存入数据库
     rec = Record(owner=owner, agent=agent, category=category,
                  quantity=quantity, price=price or 0, note=note, month=active_month)
     db.session.add(rec)
@@ -337,29 +330,29 @@ def manage_agents():
     agents = Agent.query.order_by(Agent.name).all()
     return render_template("agents.html", agents=agents)
 
-@app.route("/agents/<int:aid>/delete", methods=["POST"])
+# 新增一个专门的 API 来删除中介，前端通过 JS 调用它，这样如果有报错可以直接弹窗提示
+@app.route("/api/agents/<int:aid>", methods=["DELETE"])
 @login_required
 @admin_required
-def delete_agent(aid):
+def api_delete_agent(aid):
     a = Agent.query.get_or_404(aid)
     try:
-        # 1. 清理价格表
-        PriceRule.query.filter_by(agent=a.name).delete()
+        agent_name = a.name
+        # 1. 删价格表
+        PriceRule.query.filter_by(agent=agent_name).delete()
         
-        # 2. 强制解绑历史数据：将历史记录里的中介名称改为 "已删除中介(原名)"
-        # 这样既有历史数据不会报错，这个中介也能被彻底移除
-        old_records = Record.query.filter_by(agent=a.name).all()
+        # 2. 清理历史数据（给旧中介名字改名，解除物理绑定）
+        old_records = Record.query.filter_by(agent=agent_name).all()
         for r in old_records:
-            r.agent = f"已删除_{a.name}"
-        
-        # 3. 删除中介
+            r.agent = f"已删除_{agent_name}"
+            
+        # 3. 删中介表
         db.session.delete(a)
         db.session.commit()
-        flash(f"中介【{a.name}】已移除，历史数据已归档", "success")
+        return jsonify({"status": "success", "msg": f"中介【{agent_name}】已彻底移除！"})
     except Exception as e:
         db.session.rollback()
-        flash(f"删除失败：{str(e)}", "error")
-    return redirect(url_for("manage_agents"))
+        return jsonify({"status": "error", "msg": f"删除失败：{str(e)}"}), 500
 
 @app.route("/prices", methods=["GET", "POST"])
 @login_required
