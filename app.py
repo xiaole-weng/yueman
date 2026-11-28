@@ -45,7 +45,8 @@ DEFAULT_AGENTS = ["星空", "小泪", "小C", "怡丰", "小林", "小蕾", "狂
 def init_db():
     with app.app_context():
         db.create_all()
-        # 确保表结构最新（防止旧数据库导致报错）
+        
+        # 【终极修复 1】：强制补全所有缺失的 month 字段，并彻底清理旧表锁
         try:
             db.session.execute(text("SELECT month FROM records LIMIT 1"))
         except Exception:
@@ -56,6 +57,15 @@ def init_db():
             except Exception:
                 db.session.rollback()
 
+        # 【终极修复 2】：把数据库里所有因为早期Bug导致月份为空或 Null 的数据，强行打上标记
+        current_m = datetime.now().strftime("%Y-%m")
+        try:
+            # 把所有无月份的数据强制归类到当前月，防止它们隐身
+            db.session.execute(text(f"UPDATE records SET month = '{current_m}' WHERE month IS NULL OR month = ''"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
         if not User.query.filter_by(username="000").first():
             admin = User(username="000", role="admin")
             admin.set_password("000")
@@ -63,8 +73,6 @@ def init_db():
         if Setting.get("registration_open") is None:
             Setting.set("registration_open", "0")
             
-        # 不要再强行覆盖旧数据，保留原样，如果没有活跃月份就设当前月
-        current_m = datetime.now().strftime("%Y-%m")
         if Setting.get("active_month") is None:
             Setting.set("active_month", current_m)
 
@@ -119,6 +127,16 @@ def logout():
     logout_user()
     return redirect(url_for("login"))
 
+# ================= 增加一个强力的核对页面 =================
+@app.route("/raw_data")
+@login_required
+@admin_required
+def raw_data():
+    # 绕过所有月份过滤，直接查库
+    records = Record.query.order_by(Record.id.desc()).all()
+    return render_template("raw_data.html", records=records)
+# ==========================================================
+
 @app.route("/")
 @login_required
 def dashboard():
@@ -126,8 +144,8 @@ def dashboard():
     selected_month = request.args.get("month", active_month)
     
     query = Record.query
-    # 关键修复：如果选了具体的月份，把没有月份的旧数据也显示出来，防止“旧数据消失”
     if selected_month != "all":
+        # 强行兼容匹配：只要等于所选月份，或者没有月份
         query = query.filter((Record.month == selected_month) | (Record.month == None) | (Record.month == ""))
         
     if current_user.role == "admin":
@@ -326,25 +344,25 @@ def manage_agents():
     agents = Agent.query.order_by(Agent.name).all()
     return render_template("agents.html", agents=agents)
 
-# 物理级彻底删除中介
-@app.route("/agents/force_delete/<int:aid>")
+# 【终极修复 3】：用 DELETE 路由强行清空关联，并绕过一切拦截
+@app.route("/agents/delete/<int:aid>", methods=["POST", "GET"])
 @login_required
 @admin_required
 def force_delete_agent(aid):
     a = Agent.query.get_or_404(aid)
     agent_name = a.name
     try:
-        # 1. 清除相关价目
+        # 1. 直接物理斩断价格表关联
         PriceRule.query.filter_by(agent=agent_name).delete()
-        # 2. 把所有录入过该中介的记录，强制替换成 "已删除_中介名"
+        # 2. 把历史上填过该中介的所有明细，强行把名字改掉（这样它们就彻底解绑了，中介表才能删）
         Record.query.filter_by(agent=agent_name).update({"agent": f"已删除_{agent_name}"})
-        # 3. 删掉中介
+        # 3. 删掉中介本身
         db.session.delete(a)
         db.session.commit()
-        flash(f"中介【{agent_name}】及关联数据已彻底删除！", "success")
+        flash(f"中介【{agent_name}】已彻底拔除！", "success")
     except Exception as e:
         db.session.rollback()
-        flash(f"删不掉，数据库报错：{str(e)}", "error")
+        flash(f"删除报错：{str(e)}", "error")
     return redirect(url_for("manage_agents"))
 
 @app.route("/prices", methods=["GET", "POST"])
