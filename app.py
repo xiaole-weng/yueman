@@ -31,8 +31,6 @@ def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if not current_user.is_authenticated or current_user.role != "admin":
-            if request.is_json or request.path.startswith('/api/'):
-                return jsonify({"status": "error", "msg": "需要管理员权限"}), 403
             flash("需要管理员权限", "error")
             return redirect(url_for("dashboard"))
         return f(*args, **kwargs)
@@ -47,7 +45,7 @@ DEFAULT_AGENTS = ["星空", "小泪", "小C", "怡丰", "小林", "小蕾", "狂
 def init_db():
     with app.app_context():
         db.create_all()
-        # 强行修复老旧数据库缺失的 month 字段
+        # 强行补全可能缺失的月份字段
         try:
             db.session.execute(text("SELECT month FROM records LIMIT 1"))
         except Exception:
@@ -131,9 +129,9 @@ def dashboard():
     selected_month = request.args.get("month", active_month)
     
     query = Record.query
-    # 如果选 all，连没有 month 字段的孤儿数据也全部捞出来
+    # 查询逻辑优化：如果选了具体月份，找不到对应月份的旧数据也拉出来
     if selected_month != "all":
-        query = query.filter((Record.month == selected_month) | (Record.month == None))
+        query = query.filter((Record.month == selected_month) | (Record.month == None) | (Record.month == ""))
         
     if current_user.role == "admin":
         selected_user = request.args.get("user", "all")
@@ -334,28 +332,29 @@ def manage_agents():
     agents = Agent.query.order_by(Agent.name).all()
     return render_template("agents.html", agents=agents)
 
-@app.route("/api/agents/<int:aid>", methods=["DELETE"])
+# 这里是终极解决方案：放弃前端的 fetch，直接用 GET 请求在服务端执行清理，然后重定向回页面
+@app.route("/agents/force_delete/<int:aid>")
 @login_required
 @admin_required
-def api_delete_agent(aid):
+def force_delete_agent(aid):
     a = Agent.query.get_or_404(aid)
+    agent_name = a.name
     try:
-        agent_name = a.name
         # 1. 暴力清理价目表
         PriceRule.query.filter_by(agent=agent_name).delete()
         
-        # 2. 暴力清理历史记录，给旧中介名字改名，强行解除数据绑定
-        old_records = Record.query.filter_by(agent=agent_name).all()
-        for r in old_records:
-            r.agent = f"已删除_{agent_name}"
-            
+        # 2. 暴力清理历史记录，把旧记录强行改名，彻底解除数据库的外键或逻辑绑定
+        Record.query.filter_by(agent=agent_name).update({"agent": f"已删除_{agent_name}"})
+        
         # 3. 删中介
         db.session.delete(a)
         db.session.commit()
-        return jsonify({"status": "success", "msg": f"中介【{agent_name}】已彻底移除！"})
+        flash(f"中介【{agent_name}】及其关联数据已彻底移除！", "success")
     except Exception as e:
         db.session.rollback()
-        return jsonify({"status": "error", "msg": f"删除失败：{str(e)}"}), 500
+        flash(f"数据库拒绝删除：{str(e)}", "error")
+    
+    return redirect(url_for("manage_agents"))
 
 @app.route("/prices", methods=["GET", "POST"])
 @login_required
