@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>底层原始数据</title></head>
+<html><head><meta charset="utf-8"><title>底层全部数据</title></head>
 <body>
 <p><a href="{{ url_for('dashboard') }}">← 返回面板</a></p>
-<h2>所有历史录入记录（没有任何过滤）</h2>
+<h2>数据库底层全部明细（绝无过滤隐藏）</h2>
 <table border="1" style="border-collapse:collapse; width:100%; text-align:center;">
     <tr><th>ID</th><th>月份</th><th>所属账号</th><th>中介</th><th>类别</th><th>数量</th><th>价格</th></tr>
     {% for r in records %}
