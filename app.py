@@ -45,26 +45,16 @@ DEFAULT_AGENTS = ["星空", "小泪", "小C", "怡丰", "小林", "小蕾", "狂
 def init_db():
     with app.app_context():
         db.create_all()
-        # 1. 强行补全可能缺失的 month 字段
+        # 确保表结构最新（防止旧数据库导致报错）
         try:
             db.session.execute(text("SELECT month FROM records LIMIT 1"))
         except Exception:
             db.session.rollback()
             try:
-                current_m = datetime.now().strftime("%Y-%m")
-                db.session.execute(text(f"ALTER TABLE records ADD COLUMN month VARCHAR(7) DEFAULT '{current_m}'"))
+                db.session.execute(text("ALTER TABLE records ADD COLUMN month VARCHAR(7)"))
                 db.session.commit()
             except Exception:
                 db.session.rollback()
-
-        # 2. 【核心修复】把所有没有月份（NULL 或 空字符串）的旧数据，强制归入当前月份！
-        # 这样它们就不会在查询中隐身了。
-        current_m = datetime.now().strftime("%Y-%m")
-        try:
-            db.session.execute(text(f"UPDATE records SET month = '{current_m}' WHERE month IS NULL OR month = ''"))
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
 
         if not User.query.filter_by(username="000").first():
             admin = User(username="000", role="admin")
@@ -73,6 +63,8 @@ def init_db():
         if Setting.get("registration_open") is None:
             Setting.set("registration_open", "0")
             
+        # 不要再强行覆盖旧数据，保留原样，如果没有活跃月份就设当前月
+        current_m = datetime.now().strftime("%Y-%m")
         if Setting.get("active_month") is None:
             Setting.set("active_month", current_m)
 
@@ -101,17 +93,14 @@ def login():
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if Setting.get("registration_open", "0") != "1":
-        flash("当前未开放注册，请联系管理员", "error")
+        flash("当前未开放注册", "error")
         return redirect(url_for("login"))
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         confirm = request.form.get("confirm", "")
-        if not USERNAME_RE.match(username):
-            flash("用户名格式错误", "error")
-            return render_template("register.html")
-        if password == "" or password != confirm:
-            flash("密码不能为空或两次不一致", "error")
+        if not USERNAME_RE.match(username) or password == "" or password != confirm:
+            flash("填写信息有误", "error")
             return render_template("register.html")
         if User.query.filter(func.lower(User.username) == username.lower()).first():
             flash("该用户名已被注册", "error")
@@ -130,14 +119,6 @@ def logout():
     logout_user()
     return redirect(url_for("login"))
 
-# 终极核对页面：不管什么月份、什么过滤，直接显示库里的所有行
-@app.route("/raw_data")
-@login_required
-@admin_required
-def raw_data():
-    records = Record.query.order_by(Record.id.desc()).all()
-    return render_template("raw_data.html", records=records)
-
 @app.route("/")
 @login_required
 def dashboard():
@@ -145,8 +126,9 @@ def dashboard():
     selected_month = request.args.get("month", active_month)
     
     query = Record.query
+    # 关键修复：如果选了具体的月份，把没有月份的旧数据也显示出来，防止“旧数据消失”
     if selected_month != "all":
-        query = query.filter_by(month=selected_month)
+        query = query.filter((Record.month == selected_month) | (Record.month == None) | (Record.month == ""))
         
     if current_user.role == "admin":
         selected_user = request.args.get("user", "all")
@@ -235,10 +217,10 @@ def dashboard():
 def create_new_month():
     new_month = request.form.get("new_month", "").strip()
     if not re.match(r"^\d{4}-\d{2}$", new_month):
-        flash("月份格式错误，必须为 YYYY-MM", "error")
+        flash("月份格式错误", "error")
     else:
         Setting.set("active_month", new_month)
-        flash(f"成功创建并切换到新表：{new_month}", "success")
+        flash(f"成功切换到新表：{new_month}", "success")
     return redirect(url_for("dashboard", month=new_month))
 
 @app.route("/record/add", methods=["POST"])
@@ -247,7 +229,7 @@ def add_record():
     if current_user.role == "admin":
         owner = request.form.get("owner")
         if not owner or not User.query.filter_by(username=owner).first():
-            flash("请选择有效的所属账号", "error")
+            flash("无效账号", "error")
             return redirect(url_for("dashboard"))
         price = float(request.form.get("price") or 0)
     else:
@@ -266,9 +248,6 @@ def add_record():
         return redirect(url_for("dashboard"))
         
     if current_user.role != "admin":
-        if not Agent.query.filter_by(name=agent).first():
-            flash("该中介不存在，请联系管理员添加", "error")
-            return redirect(url_for("dashboard"))
         rule = PriceRule.query.filter_by(agent=agent, category=category).first()
         price = rule.price if rule else 0
         
@@ -276,7 +255,7 @@ def add_record():
                  quantity=quantity, price=price or 0, note=note, month=active_month)
     db.session.add(rec)
     db.session.commit()
-    flash(f"数据已自动保存至 {active_month} 统计表", "success")
+    flash(f"数据已保存至 {active_month}", "success")
     return redirect(url_for("dashboard"))
 
 @app.route("/record/<int:rid>/edit", methods=["GET", "POST"])
@@ -284,7 +263,7 @@ def add_record():
 def edit_record(rid):
     rec = Record.query.get_or_404(rid)
     if current_user.role != "admin" and rec.owner != current_user.username:
-        flash("无权编辑此记录", "error")
+        flash("无权编辑", "error")
         return redirect(url_for("dashboard"))
         
     if request.method == "POST":
@@ -299,7 +278,7 @@ def edit_record(rid):
         rec.quantity = int(request.form.get("quantity") or 0)
         rec.note = request.form.get("note", "").strip()
         db.session.commit()
-        flash("更新成功，数据已自动保存", "success")
+        flash("更新成功", "success")
         return redirect(url_for("dashboard", month=rec.month or "all"))
         
     users = User.query.order_by(User.id).all() if current_user.role == "admin" else [current_user]
@@ -347,6 +326,7 @@ def manage_agents():
     agents = Agent.query.order_by(Agent.name).all()
     return render_template("agents.html", agents=agents)
 
+# 物理级彻底删除中介
 @app.route("/agents/force_delete/<int:aid>")
 @login_required
 @admin_required
@@ -354,20 +334,17 @@ def force_delete_agent(aid):
     a = Agent.query.get_or_404(aid)
     agent_name = a.name
     try:
-        # 1. 暴力清理价目表
+        # 1. 清除相关价目
         PriceRule.query.filter_by(agent=agent_name).delete()
-        
-        # 2. 暴力清理历史记录，强制改名解绑
+        # 2. 把所有录入过该中介的记录，强制替换成 "已删除_中介名"
         Record.query.filter_by(agent=agent_name).update({"agent": f"已删除_{agent_name}"})
-        
-        # 3. 删中介
+        # 3. 删掉中介
         db.session.delete(a)
         db.session.commit()
-        flash(f"中介【{agent_name}】及其关联数据已彻底移除！", "success")
+        flash(f"中介【{agent_name}】及关联数据已彻底删除！", "success")
     except Exception as e:
         db.session.rollback()
-        flash(f"数据库拒绝删除：{str(e)}", "error")
-    
+        flash(f"删不掉，数据库报错：{str(e)}", "error")
     return redirect(url_for("manage_agents"))
 
 @app.route("/prices", methods=["GET", "POST"])
@@ -406,15 +383,12 @@ def manage_users():
 def delete_user(uid):
     user = User.query.get_or_404(uid)
     if user.username == current_user.username:
-        flash("不能删除当前登录的自己", "error")
-        return redirect(url_for("manage_users"))
-    if user.role == "admin" and User.query.filter_by(role="admin").count() <= 1:
-        flash("至少保留一个管理员账号", "error")
+        flash("不能删自己", "error")
         return redirect(url_for("manage_users"))
     Record.query.filter_by(owner=user.username).delete()
     db.session.delete(user)
     db.session.commit()
-    flash(f"已删除用户 {user.username} 及其记录", "success")
+    flash(f"已删除用户 {user.username}", "success")
     return redirect(url_for("manage_users"))
 
 @app.route("/admin/users/<int:uid>/password", methods=["GET", "POST"])
@@ -424,15 +398,12 @@ def change_user_password(uid):
     user = User.query.get_or_404(uid)
     if request.method == "POST":
         new_password = request.form.get("new_password", "")
-        confirm = request.form.get("confirm", "")
         if new_password == "":
             flash("密码不能为空", "error")
-        elif new_password != confirm:
-            flash("两次密码不一致", "error")
         else:
             user.set_password(new_password)
             db.session.commit()
-            flash(f"已修改 {user.username} 的密码", "success")
+            flash(f"已修改密码", "success")
             return redirect(url_for("manage_users"))
     return render_template("change_password.html", user=user)
 
@@ -442,7 +413,7 @@ def change_user_password(uid):
 def toggle_registration():
     current = Setting.get("registration_open", "0")
     Setting.set("registration_open", "0" if current == "1" else "1")
-    flash("注册功能已" + ("开启" if current == "0" else "关闭"), "success")
+    flash("注册状态已改变", "success")
     return redirect(url_for("dashboard"))
 
 @app.route("/export")
