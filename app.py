@@ -31,6 +31,8 @@ def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if not current_user.is_authenticated or current_user.role != "admin":
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({"status": "error", "msg": "需要管理员权限"}), 403
             flash("需要管理员权限", "error")
             return redirect(url_for("dashboard"))
         return f(*args, **kwargs)
@@ -45,7 +47,7 @@ DEFAULT_AGENTS = ["星空", "小泪", "小C", "怡丰", "小林", "小蕾", "狂
 def init_db():
     with app.app_context():
         db.create_all()
-        # 强行补全可能缺失的月份字段
+        # 强行修复老旧数据库缺失的 month 字段
         try:
             db.session.execute(text("SELECT month FROM records LIMIT 1"))
         except Exception:
@@ -129,7 +131,7 @@ def dashboard():
     selected_month = request.args.get("month", active_month)
     
     query = Record.query
-    # 如果选择 all，就不加月份过滤
+    # 如果选 all，连没有 month 字段的孤儿数据也全部捞出来
     if selected_month != "all":
         query = query.filter((Record.month == selected_month) | (Record.month == None))
         
@@ -332,28 +334,28 @@ def manage_agents():
     agents = Agent.query.order_by(Agent.name).all()
     return render_template("agents.html", agents=agents)
 
-@app.route("/agents/delete/<int:aid>", methods=["POST"])
+@app.route("/api/agents/<int:aid>", methods=["DELETE"])
 @login_required
 @admin_required
-def delete_agent(aid):
+def api_delete_agent(aid):
     a = Agent.query.get_or_404(aid)
-    agent_name = a.name
     try:
+        agent_name = a.name
         # 1. 暴力清理价目表
         PriceRule.query.filter_by(agent=agent_name).delete()
         
-        # 2. 暴力清理历史记录，强制改名解绑
-        Record.query.filter_by(agent=agent_name).update({"agent": f"已删除_{agent_name}"})
-        
-        # 3. 删除中介
+        # 2. 暴力清理历史记录，给旧中介名字改名，强行解除数据绑定
+        old_records = Record.query.filter_by(agent=agent_name).all()
+        for r in old_records:
+            r.agent = f"已删除_{agent_name}"
+            
+        # 3. 删中介
         db.session.delete(a)
         db.session.commit()
-        flash(f"中介【{agent_name}】已彻底移除", "success")
+        return jsonify({"status": "success", "msg": f"中介【{agent_name}】已彻底移除！"})
     except Exception as e:
         db.session.rollback()
-        flash(f"删除失败：{str(e)}", "error")
-    
-    return redirect(url_for("manage_agents"))
+        return jsonify({"status": "error", "msg": f"删除失败：{str(e)}"}), 500
 
 @app.route("/prices", methods=["GET", "POST"])
 @login_required
