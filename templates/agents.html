@@ -5,7 +5,7 @@ body{font-family:sans-serif;margin:20px;}
 table{border-collapse:collapse;width:60%;margin-top:16px;}
 th,td{border:1px solid #ccc;padding:8px;text-align:center;}
 th{background:#1F4E78;color:#fff;}
-.btn-del{background:#d9534f;color:#fff;border:none;padding:6px 12px;cursor:pointer;border-radius:3px;}
+.btn-del{background:#d9534f;color:#fff;border:none;padding:6px 12px;cursor:pointer;border-radius:3px;text-decoration:none;display:inline-block;}
 .btn-del:hover{background:#c9302c;}
 .btn-add{background:#1F4E78;color:#fff;border:none;padding:6px 12px;cursor:pointer;border-radius:3px;}
 .flash-success{color:green;background:#e8f5e9;padding:10px;margin-bottom:10px;border-radius:4px;} 
@@ -33,8 +33,8 @@ th{background:#1F4E78;color:#fff;}
   <td>{{ a.id }}</td>
   <td>{{ a.name }}</td>
   <td>
-    <!-- 直接使用 a 标签跳转，这次不会有任何 JS 拦截，一定会刷新并提示 -->
-    <a href="{{ url_for('force_delete_agent', aid=a.id) }}" class="btn-del" style="text-decoration:none; display:inline-block;" onclick="return confirm('确定要彻底删除中介【{{ a.name }}】吗？');">删除</a>
+    <!-- 使用普通的 a 标签跳转，避免任何 JS 和 Form 拦截 -->
+    <a href="{{ url_for('force_delete_agent', aid=a.id) }}" class="btn-del" onclick="return confirm('确定要彻底删除中介【{{ a.name }}】吗？');">删除</a>
   </td>
 </tr>
 {% endfor %}
