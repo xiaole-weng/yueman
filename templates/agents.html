@@ -34,7 +34,7 @@ th{background:#1F4E78;color:#fff;}
   <td>{{ a.name }}</td>
   <td>
     <!-- 使用普通的 a 标签跳转，避免任何 JS 和 Form 拦截 -->
-    <a href="{{ url_for('force_delete_agent', aid=a.id) }}" class="btn-del" onclick="return confirm('确定要彻底删除中介【{{ a.name }}】吗？');">删除</a>
+    <a href="/agents/force_delete/{{ a.id }}" class="btn-del" onclick="return confirm('确定要彻底删除中介【{{ a.name }}】吗？');">删除</a>
   </td>
 </tr>
 {% endfor %}
