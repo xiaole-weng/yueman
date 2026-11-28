@@ -45,7 +45,7 @@ DEFAULT_AGENTS = ["星空", "小泪", "小C", "怡丰", "小林", "小蕾", "狂
 def init_db():
     with app.app_context():
         db.create_all()
-        # 强行补全可能缺失的月份字段
+        # 1. 强行补全可能缺失的 month 字段
         try:
             db.session.execute(text("SELECT month FROM records LIMIT 1"))
         except Exception:
@@ -57,6 +57,15 @@ def init_db():
             except Exception:
                 db.session.rollback()
 
+        # 2. 【核心修复】把所有没有月份（NULL 或 空字符串）的旧数据，强制归入当前月份！
+        # 这样它们就不会在查询中隐身了。
+        current_m = datetime.now().strftime("%Y-%m")
+        try:
+            db.session.execute(text(f"UPDATE records SET month = '{current_m}' WHERE month IS NULL OR month = ''"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
         if not User.query.filter_by(username="000").first():
             admin = User(username="000", role="admin")
             admin.set_password("000")
@@ -64,7 +73,6 @@ def init_db():
         if Setting.get("registration_open") is None:
             Setting.set("registration_open", "0")
             
-        current_m = datetime.now().strftime("%Y-%m")
         if Setting.get("active_month") is None:
             Setting.set("active_month", current_m)
 
@@ -122,6 +130,14 @@ def logout():
     logout_user()
     return redirect(url_for("login"))
 
+# 终极核对页面：不管什么月份、什么过滤，直接显示库里的所有行
+@app.route("/raw_data")
+@login_required
+@admin_required
+def raw_data():
+    records = Record.query.order_by(Record.id.desc()).all()
+    return render_template("raw_data.html", records=records)
+
 @app.route("/")
 @login_required
 def dashboard():
@@ -129,9 +145,8 @@ def dashboard():
     selected_month = request.args.get("month", active_month)
     
     query = Record.query
-    # 查询逻辑优化：如果选了具体月份，找不到对应月份的旧数据也拉出来
     if selected_month != "all":
-        query = query.filter((Record.month == selected_month) | (Record.month == None) | (Record.month == ""))
+        query = query.filter_by(month=selected_month)
         
     if current_user.role == "admin":
         selected_user = request.args.get("user", "all")
@@ -332,7 +347,6 @@ def manage_agents():
     agents = Agent.query.order_by(Agent.name).all()
     return render_template("agents.html", agents=agents)
 
-# 这里是终极解决方案：放弃前端的 fetch，直接用 GET 请求在服务端执行清理，然后重定向回页面
 @app.route("/agents/force_delete/<int:aid>")
 @login_required
 @admin_required
@@ -343,7 +357,7 @@ def force_delete_agent(aid):
         # 1. 暴力清理价目表
         PriceRule.query.filter_by(agent=agent_name).delete()
         
-        # 2. 暴力清理历史记录，把旧记录强行改名，彻底解除数据库的外键或逻辑绑定
+        # 2. 暴力清理历史记录，强制改名解绑
         Record.query.filter_by(agent=agent_name).update({"agent": f"已删除_{agent_name}"})
         
         # 3. 删中介
