@@ -15,7 +15,6 @@ th{background:#1F4E78;color:#fff;}
 <p><a href="{{ url_for('dashboard') }}">← 返回数据面板</a></p>
 <h2>中介管理</h2>
 
-<!-- 重点：这里显示删除成功或失败的提示信息 -->
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% for cat, msg in messages %}
     <div class="flash-{{ cat }}">{{ msg }}</div>
@@ -34,7 +33,7 @@ th{background:#1F4E78;color:#fff;}
   <td>{{ a.id }}</td>
   <td>{{ a.name }}</td>
   <td>
-    <!-- 用最原始的 a 标签跳转去触发删除，避免任何 JS 被浏览器拦截 -->
+    <!-- 直接使用 a 标签跳转，这次不会有任何 JS 拦截，一定会刷新并提示 -->
     <a href="{{ url_for('force_delete_agent', aid=a.id) }}" class="btn-del" style="text-decoration:none; display:inline-block;" onclick="return confirm('确定要彻底删除中介【{{ a.name }}】吗？');">删除</a>
   </td>
 </tr>
